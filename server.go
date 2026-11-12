@@ -328,6 +328,12 @@ func (s *Store) addStarting(name, pane, sock, dir, prompt string) *Session {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Drop ended sessions from the same directory so relaunches don't pile up.
+	for id, x := range s.sessions {
+		if x.Status == StatusEnded && x.Cwd != "" && filepath.Clean(x.Cwd) == dir {
+			delete(s.sessions, id)
+		}
+	}
 	s.sessions[sess.ID] = sess
 	s.changedLocked()
 	go s.loadBranch(sess.ID, dir)
