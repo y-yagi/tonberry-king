@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tonberry King</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #fff; --text: #1d2330; --muted: #6b7280; --border: #e3e6eb;
+  --run: #2563eb; --run-bg: #e8efff;
+  --perm: #c2410c; --perm-bg: #fff1e6;
+  --input: #047857; --input-bg: #e3f6ee;
+  --compact: #7c3aed; --compact-bg: #f1eaff;
+  --start: #a16207; --start-bg: #fdf4d8;
+  --ended: #6b7280; --ended-bg: #eef0f3;
+  --code-bg: #f1f3f6; --term-bg: #15181e; --term-fg: #d7dce4;
+  --primary: #1d4ed8; --primary-fg: #fff; --danger: #b91c1c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --panel: #1b1f27; --text: #e5e7eb; --muted: #9aa3b2; --border: #2a303b;
+    --run: #7aa2ff; --run-bg: #1d2a4a;
+    --perm: #ff9a5c; --perm-bg: #3d2416;
+    --input: #4ade9b; --input-bg: #15352a;
+    --compact: #b794ff; --compact-bg: #2c2245;
+    --start: #f5c451; --start-bg: #3a3014;
+    --ended: #9aa3b2; --ended-bg: #262b34;
+    --code-bg: #232833; --term-bg: #0b0d11; --term-fg: #d7dce4;
+    --primary: #5b8cff; --primary-fg: #0b0d11; --danger: #f87171;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--border);
+  padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+.counts { display: flex; gap: 8px; flex-wrap: wrap; }
+.count { padding: 2px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; background: var(--cb); color: var(--c); }
+.spacer { flex: 1; }
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text); cursor: pointer; white-space: nowrap; }
+button:hover { border-color: var(--muted); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); font-weight: 600; }
+button.danger { color: var(--danger); }
+button.accent { color: var(--c); border-color: var(--c); font-weight: 600; }
+input[type=text], textarea { font: inherit; width: 100%; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+textarea { resize: vertical; min-height: 4.5em; }
+.conn { font-size: 12px; color: var(--muted); }
+.conn.off { color: var(--perm); }
+main { padding: 16px 20px 40px; max-width: 1400px; margin: 0 auto; }
+body.panel-open main { margin-right: var(--panel-w, min(680px, 50vw)); max-width: none; }
+.group { margin-bottom: 22px; }
+.group h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+.group h2 b { color: var(--text); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--c);
+  border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.card.ended { opacity: .65; }
+.card.waiting_permission { box-shadow: 0 0 0 2px var(--perm-bg); }
+.card.selected { outline: 2px solid var(--primary); outline-offset: 1px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.badge { background: var(--cb); color: var(--c); font-weight: 700; font-size: 12px; padding: 1px 8px; border-radius: 999px; }
+.meta { color: var(--muted); font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.label { color: var(--muted); font-size: 11px; letter-spacing: .04em; }
+.box { background: var(--code-bg); border-radius: 6px; padding: 6px 8px; font-size: 12.5px;
+  white-space: pre-wrap; word-break: break-word; max-height: 7.5em; overflow: auto; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.msg { color: var(--c); font-weight: 600; font-size: 13px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.events { max-height: 220px; overflow: auto; font-size: 12px; margin-top: 4px; }
+.events div { display: grid; grid-template-columns: 64px 120px 1fr; gap: 6px; padding: 1px 0; border-bottom: 1px dashed var(--border); }
+.events span:last-child { word-break: break-all; color: var(--muted); }
+.empty { color: var(--muted); text-align: center; padding: 60px 0; line-height: 2; }
+.empty code, .notice code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }
+.notice { background: var(--perm-bg); color: var(--text); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; line-height: 1.8; }
+.s-running { --c: var(--run); --cb: var(--run-bg); }
+.s-waiting_permission { --c: var(--perm); --cb: var(--perm-bg); }
+.s-waiting_input { --c: var(--input); --cb: var(--input-bg); }
+.s-compacting { --c: var(--compact); --cb: var(--compact-bg); }
+.s-starting { --c: var(--start); --cb: var(--start-bg); }
+.s-ended { --c: var(--ended); --cb: var(--ended-bg); }
+.pulse { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .45; } }
+
+/* 操作パネル */
+#panel { position: fixed; top: var(--header-h, 52px); right: 0; bottom: 0; width: var(--panel-w, min(680px, 50vw)); z-index: 3;
+  background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column;
+  box-shadow: -6px 0 24px rgba(0,0,0,.08); }
+#panel[hidden] { display: none; }
+.resizer { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 1; }
+.resizer:hover, .resizer.dragging { background: var(--primary); opacity: .35; }
+body.resizing { cursor: col-resize; user-select: none; }
+.screen-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.p-head { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.p-body { flex: 1; overflow: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+#screen { margin: 0; background: var(--term-bg); color: var(--term-fg); border-radius: 6px; padding: 10px;
+  font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; overflow: auto;
+  min-height: 240px; max-height: 52vh; }
+.keys { display: flex; gap: 4px; flex-wrap: wrap; }
+.keys button { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hint { color: var(--muted); font-size: 12px; }
+.err { color: var(--danger); font-size: 12px; min-height: 1em; }
+
+dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text);
+  width: min(560px, calc(100vw - 32px)); padding: 18px 20px; }
+dialog::backdrop { background: rgba(0,0,0,.35); }
+dialog h3 { margin: 0 0 12px; font-size: 15px; }
+dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+@media (max-width: 900px) {
+  #panel { width: 100vw; }
+  .resizer { display: none; }
+  body.panel-open main { margin-right: 0; }
+}
+@media (max-width: 600px) {
+  header, main { padding-left: 12px; padding-right: 12px; }
+  .cards { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header id="header">
+  <h1>👑 Tonberry King</h1>
+  <div class="counts" id="counts"></div>
+  <div class="spacer"></div>
+  <div class="controls">
+    <button class="primary" id="launchBtn">＋ 起動</button>
+    <label><input type="checkbox" id="hideEnded"> 終了を隠す</label>
+    <button id="clearEnded">終了セッションを削除</button>
+    <button id="notifyBtn">通知を有効化</button>
+    <span class="conn" id="conn">接続中…</span>
+  </div>
+</header>
+<main id="main"></main>
+
+<aside id="panel" hidden>
+  <div class="resizer" id="pResizer" title="ドラッグでパネルの幅を変更"></div>
+  <div class="p-head">
+    <div class="row">
+      <span class="badge" id="pBadge"></span>
+      <span class="meta" id="pDir"></span>
+      <span class="spacer"></span>
+      <button id="pClose" title="閉じる">✕</button>
+    </div>
+    <div class="title" id="pTitle"></div>
+    <div class="row meta" id="pAttach"></div>
+    <div class="msg" id="pMsg"></div>
+  </div>
+  <div class="p-body">
+    <div class="screen-bar">
+      <span class="meta" id="pSize"></span>
+      <button id="pFit" title="tmux の桁数をパネルの幅に合わせる">端末の桁数をパネルに合わせる</button>
+      <button id="pAuto" title="tmux の自動サイズ調整（接続中の端末に合わせる）に戻す">自動に戻す</button>
+      <span class="spacer"></span>
+      <button id="pFontDown" title="文字を小さく">A−</button>
+      <button id="pFontUp" title="文字を大きく">A＋</button>
+    </div>
+    <pre id="screen"></pre>
+    <div class="keys" id="pKeys">
+      <button data-key="Enter">Enter</button>
+      <button data-key="Escape">Esc</button>
+      <button data-key="Up">↑</button>
+      <button data-key="Down">↓</button>
+      <button data-key="Tab">Tab</button>
+      <button data-key="BTab" title="モード切替">Shift+Tab</button>
+      <button data-key="1">1</button>
+      <button data-key="2">2</button>
+      <button data-key="3">3</button>
+      <button data-key="C-c">Ctrl+C</button>
+    </div>
+    <textarea id="pText" rows="4" placeholder="指示を入力（Ctrl+Enter で送信）"></textarea>
+    <div class="row">
+      <button class="primary" id="pSend">送信</button>
+      <span class="hint">実行中に送ると、Claude 側で次の指示としてキューされます</span>
+      <span class="spacer"></span>
+      <button id="pInterrupt">中断 (Esc)</button>
+      <button class="danger" id="pExit">終了</button>
+    </div>
+    <div class="err" id="pErr"></div>
+  </div>
+</aside>
+
+<dialog id="launchDlg">
+  <form id="launchForm" method="dialog">
+    <h3>claude を起動</h3>
+    <label for="lDir">ディレクトリ</label>
+    <input type="text" id="lDir" list="dirList" required placeholder="~/src/github.com/...">
+    <datalist id="dirList"></datalist>
+    <label for="lPrompt">最初の指示（任意）</label>
+    <textarea id="lPrompt" rows="4"></textarea>
+    <label for="lArgs">追加の引数（任意）</label>
+    <input type="text" id="lArgs" placeholder="例: --model sonnet --permission-mode acceptEdits">
+    <div class="err" id="lErr"></div>
+    <div class="dlg-actions">
+      <button type="button" id="lCancel">キャンセル</button>
+      <button type="submit" class="primary" id="lSubmit">起動</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const LABEL = {
+  waiting_permission: "許可待ち",
+  waiting_input: "入力待ち",
+  starting: "起動中",
+  running: "実行中",
+  compacting: "圧縮中",
+  ended: "終了",
+};
+const ORDER = { waiting_permission: 0, waiting_input: 1, starting: 2, running: 3, compacting: 4, ended: 5 };
+
+let sessions = [];
+let prevStatus = new Map();
+let firstLoad = true;
+let authError = false;
+let panelId = null;
+let screenTimer = null;
+const openDetails = new Set();
+
+const $ = (id) => document.getElementById(id);
+
+// 操作パネルがヘッダーに重ならないよう、ヘッダーの実際の高さ（折り返しで変わる）に合わせる
+new ResizeObserver(([e]) => {
+  document.documentElement.style.setProperty("--header-h", `${Math.ceil(e.target.getBoundingClientRect().height)}px`);
+}).observe(document.getElementById("header"));
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+// URL の #token=... を保存してアドレスバーから消す
+(() => {
+  const m = location.hash.match(/token=([0-9a-f]+)/);
+  if (m) { store.set("token", m[1]); history.replaceState(null, "", location.pathname); }
+})();
+const token = () => store.get("token") || "";
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: { "X-Tonberry-Token": token(), ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 401) { authError = true; render(); }
+  if (!res.ok) {
+    let msg = `${res.status}`;
+    try { msg = (await res.json()).error || msg; } catch {}
+    throw new Error(msg);
+  }
+  return res;
+}
+
+$("hideEnded").checked = store.get("hideEnded") === "1";
+$("hideEnded").addEventListener("change", (e) => { store.set("hideEnded", e.target.checked ? "1" : "0"); render(); });
+$("clearEnded").addEventListener("click", () => api("POST", "/api/sessions/clear-ended").catch(() => {}));
+
+function updateNotifyBtn() {
+  const b = $("notifyBtn");
+  if (!("Notification" in window)) { b.hidden = true; return; }
+  b.hidden = Notification.permission === "granted";
+}
+$("notifyBtn").addEventListener("click", async () => { await Notification.requestPermission(); updateNotifyBtn(); });
+updateNotifyBtn();
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function ago(t) {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(t)) / 1000));
+  if (s < 60) return `${s}秒`;
+  if (s < 3600) return `${Math.floor(s / 60)}分`;
+  if (s < 86400) return `${Math.floor(s / 3600)}時間${Math.floor((s % 3600) / 60)}分`;
+  return `${Math.floor(s / 86400)}日`;
+}
+function hhmmss(t) { return new Date(t).toLocaleTimeString("ja-JP", { hour12: false }); }
+function home(p) { return (p || "").replace(/^\/home\/[^/]+/, "~").replace(/^\/Users\/[^/]+/, "~"); }
+const agoSpan = (t) => `<span class="ago" data-t="${esc(t)}">${ago(t)}</span>`;
+const controllable = (s) => s.tmux_pane && s.status !== "ended";
+
+function notifyTransitions() {
+  const next = new Map(sessions.map((s) => [s.id, s.status]));
+  if (!firstLoad && "Notification" in window && Notification.permission === "granted") {
+    for (const s of sessions) {
+      const before = prevStatus.get(s.id);
+      if (before === s.status) continue;
+      if (s.status === "waiting_permission" || (s.status === "waiting_input" && before === "running")) {
+        const dir = (s.cwd || "").split("/").pop();
+        const n = new Notification(`${LABEL[s.status]}: ${dir}`, {
+          body: s.message || s.last_assistant || s.last_prompt || "",
+          tag: s.id,
+        });
+        n.onclick = () => { window.focus(); if (s.tmux_pane) openPanel(s.id); };
+      }
+    }
+  }
+  prevStatus = next;
+  firstLoad = false;
+}
+
+function actionButtons(s) {
+  const st = s.status;
+  if (st === "ended") return `<button data-act="delete" data-id="${esc(s.id)}" title="一覧から削除">削除</button>`;
+  const id = esc(s.id);
+  if (!s.tmux_pane) {
+    return `<span class="meta">tmux 外で起動（端末から操作）</span>
+      ${s.pid ? `<button class="danger" data-act="exit" data-id="${id}">終了</button>` : ""}`;
+  }
+  let b = `<button data-act="panel" data-id="${id}">操作 / 画面</button>`;
+  if (st === "waiting_permission") {
+    b += `<button class="accent" data-act="key" data-key="1" data-id="${id}" title="選択肢 1 を選ぶ">許可 (1)</button>
+          <button data-act="key" data-key="2" data-id="${id}" title="選択肢 2 を選ぶ">2</button>
+          <button data-act="key" data-key="Escape" data-id="${id}">拒否 (Esc)</button>`;
+  }
+  if (st === "running" || st === "compacting") b += `<button data-act="interrupt" data-id="${id}">中断 (Esc)</button>`;
+  b += `<button class="danger" data-act="exit" data-id="${id}">終了</button>`;
+  return b;
+}
+
+function card(s) {
+  const st = s.status;
+  const activity = st === "running"
+    ? (s.tool_running ? `<span class="pulse">⚙</span> ${esc(s.tool)}` : (s.tool ? `思考中 <span class="meta">(直前: ${esc(s.tool)})</span>` : `<span class="pulse">…</span> 思考中`))
+    : st === "starting" ? `<span class="pulse">…</span> claude の起動を待っています（初回のディレクトリでは信頼確認が出ることがあります）` : "";
+  const toolBox = (st === "running" && s.tool_running && s.tool_detail) || (st === "waiting_permission" && s.tool_detail)
+    ? `<div class="box mono">${esc(s.tool_detail)}</div>` : "";
+  const evOpen = openDetails.has(s.id) ? "open" : "";
+  const events = (s.events || []).slice().reverse().map((e) =>
+    `<div><span class="meta">${hhmmss(e.time)}</span><span>${esc(e.name)}</span><span>${esc(e.detail)}</span></div>`).join("");
+
+  return `<div class="card s-${st} ${st} ${panelId === s.id ? "selected" : ""}">
+    <div class="row">
+      <span class="badge">${LABEL[st] || esc(st)}</span>
+      <span class="meta">${agoSpan(s.status_since || s.updated_at)}前から</span>
+      <span class="spacer"></span>
+      ${s.tmux_session ? `<span class="meta" title="tmux セッション">⧉ ${esc(s.tmux_session)}</span>` : s.tty ? `<span class="meta" title="端末">${esc(s.tty)}</span>` : ""}
+      ${s.pid ? `<span class="meta" title="PID">pid ${s.pid}</span>` : ""}
+      <span class="meta" title="${esc(s.id)}">${esc(s.id.replace(/^launch-/, "").slice(0, 8))}</span>
+    </div>
+    <div class="title" title="${esc(s.first_prompt)}">${esc(s.first_prompt || "(プロンプト未入力)")}</div>
+    ${s.message ? `<div class="msg">${esc(s.message)}</div>` : ""}
+    ${activity ? `<div>${activity}</div>` : ""}
+    ${toolBox}
+    ${s.last_prompt && s.last_prompt !== s.first_prompt ? `<div class="label">最新の指示</div><div class="box">${esc(s.last_prompt)}</div>` : ""}
+    ${s.last_assistant && st !== "running" ? `<div class="label">最後の応答</div><div class="box">${esc(s.last_assistant)}</div>` : ""}
+    <div class="actions">${actionButtons(s)}</div>
+    <details data-id="${esc(s.id)}" ${evOpen}><summary>イベント履歴 (${(s.events || []).length}) · 開始 ${hhmmss(s.started_at)} · 最終 ${agoSpan(s.updated_at)}前</summary>
+      <div class="events">${events}</div></details>
+  </div>`;
+}
+
+function render() {
+  if (authError) {
+    $("main").innerHTML = `<div class="notice">アクセストークンが無効です。端末で <code>tonberry-king url</code> を実行し、表示された URL を開いてください。</div>`;
+    return;
+  }
+  const hide = $("hideEnded").checked;
+  const counts = {};
+  for (const s of sessions) counts[s.status] = (counts[s.status] || 0) + 1;
+  $("counts").innerHTML = Object.keys(ORDER).filter((k) => counts[k])
+    .map((k) => `<span class="count s-${k}">${LABEL[k]} ${counts[k]}</span>`).join("");
+
+  const waiting = (counts.waiting_permission || 0) + (counts.waiting_input || 0);
+  document.title = (counts.waiting_permission ? `(⚠${counts.waiting_permission}) ` : waiting ? `(${waiting}) ` : "") + "Tonberry King";
+
+  const dirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))].sort();
+  $("dirList").innerHTML = dirs.map((d) => `<option value="${esc(home(d))}">`).join("");
+
+  updatePanel();
+
+  const visible = sessions.filter((s) => !(hide && s.status === "ended"));
+  if (visible.length === 0) {
+    $("main").innerHTML = `<div class="empty">表示するセッションがありません。<br>
+      右上の「＋ 起動」から claude を起動するか、hooks に <code>tonberry-king hook</code> を設定して claude を起動してください。<br>
+      設定例は <code>tonberry-king hooks-config</code> で出力できます。</div>`;
+    return;
+  }
+
+  const groups = new Map();
+  for (const s of visible) {
+    const k = s.cwd || "(unknown)";
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(s);
+  }
+  const rank = (s) => ORDER[s.status] ?? 9;
+  const sorted = [...groups.entries()].map(([cwd, list]) => {
+    list.sort((a, b) => rank(a) - rank(b) || new Date(a.status_since) - new Date(b.status_since));
+    return { cwd, list, best: Math.min(...list.map(rank)) };
+  }).sort((a, b) => a.best - b.best || a.cwd.localeCompare(b.cwd));
+
+  $("main").innerHTML = sorted.map(({ cwd, list }) => {
+    const p = home(cwd);
+    const i = p.lastIndexOf("/");
+    const branch = list.find((s) => s.branch)?.branch;
+    return `<section class="group"><h2><span>${esc(p.slice(0, i + 1))}<b>${esc(p.slice(i + 1))}</b></span>
+      ${branch ? `<span>⎇ ${esc(branch)}</span>` : ""}<span>· ${list.length}件</span>
+      <button data-act="launch-here" data-dir="${esc(p)}" title="このディレクトリで新しく起動">＋ ここで起動</button></h2>
+      <div class="cards">${list.map(card).join("")}</div></section>`;
+  }).join("");
+}
+
+// ---- カード上のボタン ----
+async function runAction(act, id, el) {
+  const s = sessions.find((x) => x.id === id);
+  try {
+    switch (act) {
+      case "panel": openPanel(id); break;
+      case "delete": await api("DELETE", `/api/sessions/${encodeURIComponent(id)}`); break;
+      case "key": await api("POST", `/api/sessions/${encodeURIComponent(id)}/keys`, { keys: [el.dataset.key] }); break;
+      case "interrupt": await api("POST", `/api/sessions/${encodeURIComponent(id)}/stop`, { mode: "interrupt" }); break;
+      case "exit": {
+        const dir = (s?.cwd || "").split("/").pop();
+        if (!confirm(`${dir} の claude を終了しますか？`)) return;
+        await api("POST", `/api/sessions/${encodeURIComponent(id)}/stop`, { mode: "exit" });
+        break;
+      }
+    }
+    if (panelId === id) refreshScreen();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+$("main").addEventListener("click", (e) => {
+  const el = e.target.closest("button[data-act]");
+  if (!el) return;
+  if (el.dataset.act === "launch-here") { openLaunch(el.dataset.dir); return; }
+  runAction(el.dataset.act, el.dataset.id, el);
+});
+$("main").addEventListener("toggle", (e) => {
+  const id = e.target?.dataset?.id;
+  if (!id) return;
+  e.target.open ? openDetails.add(id) : openDetails.delete(id);
+}, true);
+
+// ---- 操作パネル ----
+function openPanel(id) {
+  if (panelId !== id) { $("pText").value = ""; $("screen").textContent = ""; }
+  panelId = id;
+  $("panel").hidden = false;
+  document.body.classList.add("panel-open");
+  $("pErr").textContent = "";
+  render();
+  refreshScreen();
+  clearInterval(screenTimer);
+  screenTimer = setInterval(refreshScreen, 1500);
+  $("pText").focus();
+}
+function closePanel() {
+  panelId = null;
+  clearInterval(screenTimer);
+  $("panel").hidden = true;
+  document.body.classList.remove("panel-open");
+  render();
+}
+$("pClose").addEventListener("click", closePanel);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && panelId && document.activeElement !== $("pText") && !$("launchDlg").open) closePanel(); });
+
+function updatePanel() {
+  if (!panelId) return;
+  const s = sessions.find((x) => x.id === panelId);
+  if (!s) {
+    // 起動中の仮セッションが実セッションに引き継がれたら追従する
+    const prev = $("panel").dataset.pane;
+    const next = prev && sessions.find((x) => x.tmux_pane === prev && x.status !== "ended");
+    if (next) { panelId = next.id; return updatePanel(); }
+    $("pMsg").textContent = "セッションが一覧から削除されました";
+    return;
+  }
+  $("panel").dataset.pane = s.tmux_pane || "";
+  $("panel").className = `s-${s.status}`;
+  $("pBadge").textContent = LABEL[s.status] || s.status;
+  $("pDir").textContent = home(s.cwd);
+  $("pTitle").textContent = s.first_prompt || "(プロンプト未入力)";
+  $("pMsg").textContent = s.message || "";
+  $("pAttach").innerHTML = s.tmux_session
+    ? `端末から接続: <code class="mono">tmux attach -t ${esc(s.tmux_session)}</code> <button id="pCopy">コピー</button>` : "";
+  const ok = controllable(s);
+  for (const b of $("panel").querySelectorAll(".keys button, #pSend, #pInterrupt, #pFit, #pAuto")) b.disabled = !ok;
+  $("pExit").disabled = s.status === "ended";
+}
+$("panel").addEventListener("click", (e) => {
+  if (e.target.id === "pCopy") {
+    const s = sessions.find((x) => x.id === panelId);
+    navigator.clipboard?.writeText(`tmux attach -t ${s.tmux_session}`);
+    e.target.textContent = "コピーしました";
+    return;
+  }
+  const k = e.target.closest("button[data-key]");
+  if (k && panelId) runAction("key", panelId, k);
+});
+
+async function refreshScreen() {
+  const s = sessions.find((x) => x.id === panelId);
+  if (!s || !controllable(s)) { if (s?.status === "ended") $("screen").textContent = "（セッションは終了しました）"; return; }
+  try {
+    const res = await api("GET", `/api/sessions/${encodeURIComponent(panelId)}/screen`);
+    const text = await res.text();
+    const size = res.headers.get("X-Pane-Size");
+    $("pSize").textContent = size ? `端末 ${size.replace("x", " 桁 × ")} 行` : "";
+    const el = $("screen");
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+    if (el.textContent !== text) {
+      el.textContent = text;
+      if (atBottom) el.scrollTop = el.scrollHeight;
+    }
+  } catch (e) {
+    $("screen").textContent = `画面を取得できません: ${e.message}`;
+  }
+}
+
+async function sendText() {
+  const text = $("pText").value;
+  if (!panelId || !text.trim()) return;
+  $("pSend").disabled = true;
+  $("pErr").textContent = "";
+  try {
+    await api("POST", `/api/sessions/${encodeURIComponent(panelId)}/send`, { text });
+    $("pText").value = "";
+    setTimeout(refreshScreen, 300);
+  } catch (e) {
+    $("pErr").textContent = e.message;
+  } finally {
+    $("pSend").disabled = false;
+  }
+}
+$("pSend").addEventListener("click", sendText);
+$("pText").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); sendText(); }
+});
+$("pInterrupt").addEventListener("click", () => panelId && runAction("interrupt", panelId));
+$("pExit").addEventListener("click", () => panelId && runAction("exit", panelId));
+
+// ---- パネル幅・端末の桁数・文字サイズ ----
+function setPanelWidth(px) {
+  const w = Math.round(Math.min(Math.max(px, 360), window.innerWidth - 160));
+  document.documentElement.style.setProperty("--panel-w", `${w}px`);
+  return w;
+}
+if (store.get("panelW")) setPanelWidth(Number(store.get("panelW")));
+$("pResizer").addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  const r = $("pResizer");
+  r.setPointerCapture(e.pointerId);
+  r.classList.add("dragging");
+  document.body.classList.add("resizing");
+  const move = (ev) => setPanelWidth(window.innerWidth - ev.clientX);
+  const up = (ev) => {
+    store.set("panelW", String(setPanelWidth(window.innerWidth - ev.clientX)));
+    r.classList.remove("dragging");
+    document.body.classList.remove("resizing");
+    r.removeEventListener("pointermove", move);
+    r.removeEventListener("pointerup", up);
+  };
+  r.addEventListener("pointermove", move);
+  r.addEventListener("pointerup", up);
+});
+
+let fontSize = Number(store.get("screenFont")) || 12;
+function applyFont() { $("screen").style.fontSize = `${fontSize}px`; store.set("screenFont", String(fontSize)); }
+applyFont();
+$("pFontDown").addEventListener("click", () => { fontSize = Math.max(8, fontSize - 1); applyFont(); });
+$("pFontUp").addEventListener("click", () => { fontSize = Math.min(20, fontSize + 1); applyFont(); });
+
+// 画面表示欄に収まる桁数を、等幅フォント 1 文字の幅から計算する
+function fitCols() {
+  const pre = $("screen");
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+  probe.textContent = "M".repeat(100);
+  pre.appendChild(probe);
+  const charW = probe.getBoundingClientRect().width / 100;
+  probe.remove();
+  const cs = getComputedStyle(pre);
+  const inner = pre.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  return Math.max(40, Math.floor(inner / charW) - 1);
+}
+async function resizeTerm(body) {
+  if (!panelId) return;
+  $("pErr").textContent = "";
+  try {
+    await api("POST", `/api/sessions/${encodeURIComponent(panelId)}/resize`, body);
+    setTimeout(refreshScreen, 300);
+  } catch (e) {
+    $("pErr").textContent = e.message;
+  }
+}
+$("pFit").addEventListener("click", () => resizeTerm({ cols: fitCols() }));
+$("pAuto").addEventListener("click", () => resizeTerm({ auto: true }));
+
+// ---- 起動ダイアログ ----
+function openLaunch(dir) {
+  $("lErr").textContent = "";
+  if (dir) $("lDir").value = dir;
+  else if (!$("lDir").value) $("lDir").value = store.get("lastDir") || "";
+  $("lArgs").value = $("lArgs").value || store.get("lastArgs") || "";
+  $("launchDlg").showModal();
+  (dir ? $("lPrompt") : $("lDir")).focus();
+}
+$("launchBtn").addEventListener("click", () => openLaunch());
+$("lCancel").addEventListener("click", () => $("launchDlg").close());
+$("launchForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("lSubmit").disabled = true;
+  $("lErr").textContent = "";
+  const body = { dir: $("lDir").value, prompt: $("lPrompt").value, args: $("lArgs").value };
+  try {
+    const res = await api("POST", "/api/launch", body);
+    const { id } = await res.json();
+    store.set("lastDir", body.dir);
+    store.set("lastArgs", body.args);
+    $("lPrompt").value = "";
+    $("launchDlg").close();
+    setTimeout(() => openPanel(id), 200);
+  } catch (err) {
+    $("lErr").textContent = err.message;
+  } finally {
+    $("lSubmit").disabled = false;
+  }
+});
+
+// ---- ライブ更新 ----
+function connect() {
+  if (!token()) { authError = true; render(); return; }
+  const es = new EventSource(`/api/events?token=${encodeURIComponent(token())}`);
+  es.onopen = () => { authError = false; $("conn").textContent = "● ライブ"; $("conn").className = "conn"; };
+  es.onmessage = (ev) => {
+    sessions = JSON.parse(ev.data) || [];
+    notifyTransitions();
+    render();
+  };
+  es.onerror = async () => {
+    $("conn").textContent = "● 切断（再接続中）"; $("conn").className = "conn off";
+    // 401 の場合 EventSource は再接続しないので確認する
+    try { await api("GET", "/api/sessions"); } catch {}
+    if (authError) es.close();
+  };
+}
+connect();
+setInterval(() => { // 経過時間表示だけ更新（DOM は作り直さない）
+  for (const el of document.querySelectorAll(".ago")) el.textContent = ago(el.dataset.t);
+}, 5000);
+</script>
+</body>
+</html>
