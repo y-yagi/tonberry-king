@@ -57,9 +57,12 @@ body.panel-open main { margin-right: var(--panel-w, min(680px, 50vw)); max-width
 .group h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
 .group h2 b { color: var(--text); }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; align-items: start; }
 .card { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--c);
-  border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  cursor: pointer; }
+.card:hover { border-color: var(--muted); border-left-color: var(--c); }
+.card .box { max-height: 4.5em; }
 .card.ended { opacity: .65; }
 .card.waiting_permission { box-shadow: 0 0 0 2px var(--perm-bg); }
 .card.selected { outline: 2px solid var(--primary); outline-offset: 1px; }
@@ -185,6 +188,9 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
       <button class="danger" id="pExit">Exit</button>
     </div>
     <div class="err" id="pErr"></div>
+    <div id="pPrompt" hidden><div class="label">Latest instruction</div><div class="box"></div></div>
+    <div id="pLast" hidden><div class="label">Last response</div><div class="box"></div></div>
+    <details id="pEvents"><summary></summary><div class="events"></div></details>
   </div>
 </aside>
 
@@ -223,7 +229,6 @@ let firstLoad = true;
 let authError = false;
 let panelId = null;
 let screenTimer = null;
-const openDetails = new Set();
 
 const $ = (id) => document.getElementById(id);
 
@@ -310,17 +315,16 @@ function actionButtons(s) {
   if (st === "ended") return `<button data-act="delete" data-id="${esc(s.id)}" title="Remove from the list">Remove</button>`;
   const id = esc(s.id);
   if (!s.tmux_pane) {
-    return `<span class="meta">Started outside tmux (use its terminal)</span>
+    return `<span class="meta">Outside tmux</span>
       ${s.pid ? `<button class="danger" data-act="exit" data-id="${id}">Exit</button>` : ""}`;
   }
-  let b = `<button data-act="panel" data-id="${id}">Control / Screen</button>`;
+  let b = "";
   if (st === "waiting_permission") {
     b += `<button class="accent" data-act="key" data-key="1" data-id="${id}" title="Choose option 1">Allow (1)</button>
           <button data-act="key" data-key="2" data-id="${id}" title="Choose option 2">2</button>
           <button data-act="key" data-key="Escape" data-id="${id}">Deny (Esc)</button>`;
   }
   if (st === "running" || st === "compacting") b += `<button data-act="interrupt" data-id="${id}">Interrupt (Esc)</button>`;
-  b += `<button class="danger" data-act="exit" data-id="${id}">Exit</button>`;
   return b;
 }
 
@@ -331,28 +335,20 @@ function card(s) {
     : st === "starting" ? `<span class="pulse">…</span> Waiting for claude to start (a trust prompt may appear for a new directory)` : "";
   const toolBox = (st === "running" && s.tool_running && s.tool_detail) || (st === "waiting_permission" && s.tool_detail)
     ? `<div class="box mono">${esc(s.tool_detail)}</div>` : "";
-  const evOpen = openDetails.has(s.id) ? "open" : "";
-  const events = (s.events || []).slice().reverse().map((e) =>
-    `<div><span class="meta">${hhmmss(e.time)}</span><span>${esc(e.name)}</span><span>${esc(e.detail)}</span></div>`).join("");
 
-  return `<div class="card s-${st} ${st} ${panelId === s.id ? "selected" : ""}">
+  const tip = [s.tmux_session && `tmux ${s.tmux_session}`, !s.tmux_session && s.tty && `tty ${s.tty}`, s.pid && `pid ${s.pid}`, `id ${s.id}`]
+    .filter(Boolean).join(" · ");
+  const actions = actionButtons(s);
+  return `<div class="card s-${st} ${st} ${panelId === s.id ? "selected" : ""}" data-card="${esc(s.id)}" title="${esc(tip)}">
     <div class="row">
       <span class="badge">${LABEL[st] || esc(st)}</span>
       <span class="meta">for ${agoSpan(s.status_since || s.updated_at)}</span>
-      <span class="spacer"></span>
-      ${s.tmux_session ? `<span class="meta" title="tmux session">⧉ ${esc(s.tmux_session)}</span>` : s.tty ? `<span class="meta" title="Terminal">${esc(s.tty)}</span>` : ""}
-      ${s.pid ? `<span class="meta" title="PID">pid ${s.pid}</span>` : ""}
-      <span class="meta" title="${esc(s.id)}">${esc(s.id.replace(/^launch-/, "").slice(0, 8))}</span>
     </div>
     <div class="title" title="${esc(s.first_prompt)}">${esc(s.first_prompt || "(no prompt yet)")}</div>
     ${s.message ? `<div class="msg">${esc(s.message)}</div>` : ""}
-    ${activity ? `<div>${activity}</div>` : ""}
+    ${activity ? `<div class="title">${activity}</div>` : ""}
     ${toolBox}
-    ${s.last_prompt && s.last_prompt !== s.first_prompt ? `<div class="label">Latest instruction</div><div class="box">${esc(s.last_prompt)}</div>` : ""}
-    ${s.last_assistant && st !== "running" ? `<div class="label">Last response</div><div class="box">${esc(s.last_assistant)}</div>` : ""}
-    <div class="actions">${actionButtons(s)}</div>
-    <details data-id="${esc(s.id)}" ${evOpen}><summary>Events (${(s.events || []).length}) · started ${hhmmss(s.started_at)} · last ${agoSpan(s.updated_at)} ago</summary>
-      <div class="events">${events}</div></details>
+    ${actions ? `<div class="actions">${actions}</div>` : ""}
   </div>`;
 }
 
@@ -430,15 +426,15 @@ async function runAction(act, id, el) {
 
 $("main").addEventListener("click", (e) => {
   const el = e.target.closest("button[data-act]");
-  if (!el) return;
-  if (el.dataset.act === "launch-here") { openLaunch(el.dataset.dir); return; }
-  runAction(el.dataset.act, el.dataset.id, el);
+  if (el) {
+    if (el.dataset.act === "launch-here") { openLaunch(el.dataset.dir); return; }
+    runAction(el.dataset.act, el.dataset.id, el);
+    return;
+  }
+  // Clicking anywhere else on a card opens it in the control panel (unless the user is selecting text).
+  const c = e.target.closest(".card[data-card]");
+  if (c && !String(getSelection())) openPanel(c.dataset.card);
 });
-$("main").addEventListener("toggle", (e) => {
-  const id = e.target?.dataset?.id;
-  if (!id) return;
-  e.target.open ? openDetails.add(id) : openDetails.delete(id);
-}, true);
 
 // ---- control panel ----
 function openPanel(id) {
@@ -477,11 +473,19 @@ function updatePanel() {
   $("panel").dataset.pane = s.tmux_pane || "";
   $("panel").className = `s-${s.status}`;
   $("pBadge").textContent = LABEL[s.status] || s.status;
-  $("pDir").textContent = home(s.cwd);
   $("pTitle").textContent = s.first_prompt || "(no prompt yet)";
   $("pMsg").textContent = s.message || "";
   $("pAttach").innerHTML = s.tmux_session
     ? `Attach from a terminal: <code class="mono">tmux attach -t ${esc(s.tmux_session)}</code> <button id="pCopy">Copy</button>` : "";
+  const meta = [s.tmux_session ? "" : s.tty && `tty ${s.tty}`, s.pid && `pid ${s.pid}`, `id ${s.id.replace(/^launch-/, "").slice(0, 8)}`].filter(Boolean).join(" · ");
+  $("pDir").textContent = `${home(s.cwd)}${s.branch ? ` ⎇ ${s.branch}` : ""} · ${meta}`;
+  const setBox = (id, text) => { $(id).hidden = !text; $(id).querySelector(".box").textContent = text || ""; };
+  setBox("pPrompt", s.last_prompt && s.last_prompt !== s.first_prompt ? s.last_prompt : "");
+  setBox("pLast", s.status !== "running" ? s.last_assistant : "");
+  $("pEvents").querySelector("summary").innerHTML =
+    `Events (${(s.events || []).length}) · started ${hhmmss(s.started_at)} · last ${agoSpan(s.updated_at)} ago`;
+  $("pEvents").querySelector(".events").innerHTML = (s.events || []).slice().reverse().map((e) =>
+    `<div><span class="meta">${hhmmss(e.time)}</span><span>${esc(e.name)}</span><span>${esc(e.detail)}</span></div>`).join("");
   const ok = controllable(s);
   for (const b of $("panel").querySelectorAll(".keys button, #pSend, #pInterrupt, #pFit, #pAuto")) b.disabled = !ok;
   $("pExit").disabled = s.status === "ended";
@@ -499,7 +503,11 @@ $("panel").addEventListener("click", (e) => {
 
 async function refreshScreen() {
   const s = sessions.find((x) => x.id === panelId);
-  if (!s || !controllable(s)) { if (s?.status === "ended") $("screen").textContent = "(session has ended)"; return; }
+  if (!s || !controllable(s)) {
+    if (s?.status === "ended") $("screen").textContent = "(session has ended)";
+    else if (s && !s.tmux_pane) $("screen").textContent = "(started outside tmux; use its terminal)";
+    return;
+  }
   try {
     const res = await api("GET", `/api/sessions/${encodeURIComponent(panelId)}/screen`);
     const text = await res.text();
