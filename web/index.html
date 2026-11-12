@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -89,7 +89,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .pulse { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
 
-/* 操作パネル */
+/* control panel */
 #panel { position: fixed; top: var(--header-h, 52px); right: 0; bottom: 0; width: var(--panel-w, min(680px, 50vw)); z-index: 3;
   background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column;
   box-shadow: -6px 0 24px rgba(0,0,0,.08); }
@@ -132,23 +132,23 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
   <div class="counts" id="counts"></div>
   <div class="spacer"></div>
   <div class="controls">
-    <button class="primary" id="launchBtn">＋ 起動</button>
-    <label><input type="checkbox" id="hideEnded"> 終了を隠す</label>
-    <button id="clearEnded">終了セッションを削除</button>
-    <button id="notifyBtn">通知を有効化</button>
-    <span class="conn" id="conn">接続中…</span>
+    <button class="primary" id="launchBtn">+ Launch</button>
+    <label><input type="checkbox" id="hideEnded"> Hide ended</label>
+    <button id="clearEnded">Clear ended</button>
+    <button id="notifyBtn">Enable notifications</button>
+    <span class="conn" id="conn">Connecting…</span>
   </div>
 </header>
 <main id="main"></main>
 
 <aside id="panel" hidden>
-  <div class="resizer" id="pResizer" title="ドラッグでパネルの幅を変更"></div>
+  <div class="resizer" id="pResizer" title="Drag to resize the panel"></div>
   <div class="p-head">
     <div class="row">
       <span class="badge" id="pBadge"></span>
       <span class="meta" id="pDir"></span>
       <span class="spacer"></span>
-      <button id="pClose" title="閉じる">✕</button>
+      <button id="pClose" title="Close">✕</button>
     </div>
     <div class="title" id="pTitle"></div>
     <div class="row meta" id="pAttach"></div>
@@ -157,11 +157,11 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
   <div class="p-body">
     <div class="screen-bar">
       <span class="meta" id="pSize"></span>
-      <button id="pFit" title="tmux の桁数をパネルの幅に合わせる">端末の桁数をパネルに合わせる</button>
-      <button id="pAuto" title="tmux の自動サイズ調整（接続中の端末に合わせる）に戻す">自動に戻す</button>
+      <button id="pFit" title="Resize the tmux window to fit the panel width">Fit terminal to panel</button>
+      <button id="pAuto" title="Restore tmux automatic sizing (follow attached clients)">Auto size</button>
       <span class="spacer"></span>
-      <button id="pFontDown" title="文字を小さく">A−</button>
-      <button id="pFontUp" title="文字を大きく">A＋</button>
+      <button id="pFontDown" title="Smaller text">A-</button>
+      <button id="pFontUp" title="Larger text">A+</button>
     </div>
     <pre id="screen"></pre>
     <div class="keys" id="pKeys">
@@ -170,19 +170,19 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
       <button data-key="Up">↑</button>
       <button data-key="Down">↓</button>
       <button data-key="Tab">Tab</button>
-      <button data-key="BTab" title="モード切替">Shift+Tab</button>
+      <button data-key="BTab" title="Cycle mode">Shift+Tab</button>
       <button data-key="1">1</button>
       <button data-key="2">2</button>
       <button data-key="3">3</button>
       <button data-key="C-c">Ctrl+C</button>
     </div>
-    <textarea id="pText" rows="4" placeholder="指示を入力（Ctrl+Enter で送信）"></textarea>
+    <textarea id="pText" rows="4" placeholder="Type an instruction (Ctrl+Enter to send)"></textarea>
     <div class="row">
-      <button class="primary" id="pSend">送信</button>
-      <span class="hint">実行中に送ると、Claude 側で次の指示としてキューされます</span>
+      <button class="primary" id="pSend">Send</button>
+      <span class="hint">If Claude is busy, the message is queued as the next instruction</span>
       <span class="spacer"></span>
-      <button id="pInterrupt">中断 (Esc)</button>
-      <button class="danger" id="pExit">終了</button>
+      <button id="pInterrupt">Interrupt (Esc)</button>
+      <button class="danger" id="pExit">Exit</button>
     </div>
     <div class="err" id="pErr"></div>
   </div>
@@ -190,30 +190,30 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
 
 <dialog id="launchDlg">
   <form id="launchForm" method="dialog">
-    <h3>claude を起動</h3>
-    <label for="lDir">ディレクトリ</label>
+    <h3>Launch claude</h3>
+    <label for="lDir">Directory</label>
     <input type="text" id="lDir" list="dirList" required placeholder="~/src/github.com/...">
     <datalist id="dirList"></datalist>
-    <label for="lPrompt">最初の指示（任意）</label>
+    <label for="lPrompt">Initial instruction (optional)</label>
     <textarea id="lPrompt" rows="4"></textarea>
-    <label for="lArgs">追加の引数（任意）</label>
-    <input type="text" id="lArgs" placeholder="例: --model sonnet --permission-mode acceptEdits">
+    <label for="lArgs">Extra arguments (optional)</label>
+    <input type="text" id="lArgs" placeholder="e.g. --model sonnet --permission-mode acceptEdits">
     <div class="err" id="lErr"></div>
     <div class="dlg-actions">
-      <button type="button" id="lCancel">キャンセル</button>
-      <button type="submit" class="primary" id="lSubmit">起動</button>
+      <button type="button" id="lCancel">Cancel</button>
+      <button type="submit" class="primary" id="lSubmit">Launch</button>
     </div>
   </form>
 </dialog>
 
 <script>
 const LABEL = {
-  waiting_permission: "許可待ち",
-  waiting_input: "入力待ち",
-  starting: "起動中",
-  running: "実行中",
-  compacting: "圧縮中",
-  ended: "終了",
+  waiting_permission: "Needs permission",
+  waiting_input: "Waiting for input",
+  starting: "Starting",
+  running: "Running",
+  compacting: "Compacting",
+  ended: "Ended",
 };
 const ORDER = { waiting_permission: 0, waiting_input: 1, starting: 2, running: 3, compacting: 4, ended: 5 };
 
@@ -227,7 +227,7 @@ const openDetails = new Set();
 
 const $ = (id) => document.getElementById(id);
 
-// 操作パネルがヘッダーに重ならないよう、ヘッダーの実際の高さ（折り返しで変わる）に合わせる
+// Keep the panel below the header; its height changes when it wraps.
 new ResizeObserver(([e]) => {
   document.documentElement.style.setProperty("--header-h", `${Math.ceil(e.target.getBoundingClientRect().height)}px`);
 }).observe(document.getElementById("header"));
@@ -236,7 +236,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
 
-// URL の #token=... を保存してアドレスバーから消す
+// Save #token=... from the URL and remove it from the address bar.
 (() => {
   const m = location.hash.match(/token=([0-9a-f]+)/);
   if (m) { store.set("token", m[1]); history.replaceState(null, "", location.pathname); }
@@ -275,12 +275,12 @@ function esc(s) {
 }
 function ago(t) {
   const s = Math.max(0, Math.floor((Date.now() - new Date(t)) / 1000));
-  if (s < 60) return `${s}秒`;
-  if (s < 3600) return `${Math.floor(s / 60)}分`;
-  if (s < 86400) return `${Math.floor(s / 3600)}時間${Math.floor((s % 3600) / 60)}分`;
-  return `${Math.floor(s / 86400)}日`;
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return `${Math.floor(s / 86400)}d`;
 }
-function hhmmss(t) { return new Date(t).toLocaleTimeString("ja-JP", { hour12: false }); }
+function hhmmss(t) { return new Date(t).toLocaleTimeString("en-GB", { hour12: false }); }
 function home(p) { return (p || "").replace(/^\/home\/[^/]+/, "~").replace(/^\/Users\/[^/]+/, "~"); }
 const agoSpan = (t) => `<span class="ago" data-t="${esc(t)}">${ago(t)}</span>`;
 const controllable = (s) => s.tmux_pane && s.status !== "ended";
@@ -307,28 +307,28 @@ function notifyTransitions() {
 
 function actionButtons(s) {
   const st = s.status;
-  if (st === "ended") return `<button data-act="delete" data-id="${esc(s.id)}" title="一覧から削除">削除</button>`;
+  if (st === "ended") return `<button data-act="delete" data-id="${esc(s.id)}" title="Remove from the list">Remove</button>`;
   const id = esc(s.id);
   if (!s.tmux_pane) {
-    return `<span class="meta">tmux 外で起動（端末から操作）</span>
-      ${s.pid ? `<button class="danger" data-act="exit" data-id="${id}">終了</button>` : ""}`;
+    return `<span class="meta">Started outside tmux (use its terminal)</span>
+      ${s.pid ? `<button class="danger" data-act="exit" data-id="${id}">Exit</button>` : ""}`;
   }
-  let b = `<button data-act="panel" data-id="${id}">操作 / 画面</button>`;
+  let b = `<button data-act="panel" data-id="${id}">Control / Screen</button>`;
   if (st === "waiting_permission") {
-    b += `<button class="accent" data-act="key" data-key="1" data-id="${id}" title="選択肢 1 を選ぶ">許可 (1)</button>
-          <button data-act="key" data-key="2" data-id="${id}" title="選択肢 2 を選ぶ">2</button>
-          <button data-act="key" data-key="Escape" data-id="${id}">拒否 (Esc)</button>`;
+    b += `<button class="accent" data-act="key" data-key="1" data-id="${id}" title="Choose option 1">Allow (1)</button>
+          <button data-act="key" data-key="2" data-id="${id}" title="Choose option 2">2</button>
+          <button data-act="key" data-key="Escape" data-id="${id}">Deny (Esc)</button>`;
   }
-  if (st === "running" || st === "compacting") b += `<button data-act="interrupt" data-id="${id}">中断 (Esc)</button>`;
-  b += `<button class="danger" data-act="exit" data-id="${id}">終了</button>`;
+  if (st === "running" || st === "compacting") b += `<button data-act="interrupt" data-id="${id}">Interrupt (Esc)</button>`;
+  b += `<button class="danger" data-act="exit" data-id="${id}">Exit</button>`;
   return b;
 }
 
 function card(s) {
   const st = s.status;
   const activity = st === "running"
-    ? (s.tool_running ? `<span class="pulse">⚙</span> ${esc(s.tool)}` : (s.tool ? `思考中 <span class="meta">(直前: ${esc(s.tool)})</span>` : `<span class="pulse">…</span> 思考中`))
-    : st === "starting" ? `<span class="pulse">…</span> claude の起動を待っています（初回のディレクトリでは信頼確認が出ることがあります）` : "";
+    ? (s.tool_running ? `<span class="pulse">⚙</span> ${esc(s.tool)}` : (s.tool ? `Thinking <span class="meta">(last: ${esc(s.tool)})</span>` : `<span class="pulse">…</span> Thinking`))
+    : st === "starting" ? `<span class="pulse">…</span> Waiting for claude to start (a trust prompt may appear for a new directory)` : "";
   const toolBox = (st === "running" && s.tool_running && s.tool_detail) || (st === "waiting_permission" && s.tool_detail)
     ? `<div class="box mono">${esc(s.tool_detail)}</div>` : "";
   const evOpen = openDetails.has(s.id) ? "open" : "";
@@ -338,27 +338,27 @@ function card(s) {
   return `<div class="card s-${st} ${st} ${panelId === s.id ? "selected" : ""}">
     <div class="row">
       <span class="badge">${LABEL[st] || esc(st)}</span>
-      <span class="meta">${agoSpan(s.status_since || s.updated_at)}前から</span>
+      <span class="meta">for ${agoSpan(s.status_since || s.updated_at)}</span>
       <span class="spacer"></span>
-      ${s.tmux_session ? `<span class="meta" title="tmux セッション">⧉ ${esc(s.tmux_session)}</span>` : s.tty ? `<span class="meta" title="端末">${esc(s.tty)}</span>` : ""}
+      ${s.tmux_session ? `<span class="meta" title="tmux session">⧉ ${esc(s.tmux_session)}</span>` : s.tty ? `<span class="meta" title="Terminal">${esc(s.tty)}</span>` : ""}
       ${s.pid ? `<span class="meta" title="PID">pid ${s.pid}</span>` : ""}
       <span class="meta" title="${esc(s.id)}">${esc(s.id.replace(/^launch-/, "").slice(0, 8))}</span>
     </div>
-    <div class="title" title="${esc(s.first_prompt)}">${esc(s.first_prompt || "(プロンプト未入力)")}</div>
+    <div class="title" title="${esc(s.first_prompt)}">${esc(s.first_prompt || "(no prompt yet)")}</div>
     ${s.message ? `<div class="msg">${esc(s.message)}</div>` : ""}
     ${activity ? `<div>${activity}</div>` : ""}
     ${toolBox}
-    ${s.last_prompt && s.last_prompt !== s.first_prompt ? `<div class="label">最新の指示</div><div class="box">${esc(s.last_prompt)}</div>` : ""}
-    ${s.last_assistant && st !== "running" ? `<div class="label">最後の応答</div><div class="box">${esc(s.last_assistant)}</div>` : ""}
+    ${s.last_prompt && s.last_prompt !== s.first_prompt ? `<div class="label">Latest instruction</div><div class="box">${esc(s.last_prompt)}</div>` : ""}
+    ${s.last_assistant && st !== "running" ? `<div class="label">Last response</div><div class="box">${esc(s.last_assistant)}</div>` : ""}
     <div class="actions">${actionButtons(s)}</div>
-    <details data-id="${esc(s.id)}" ${evOpen}><summary>イベント履歴 (${(s.events || []).length}) · 開始 ${hhmmss(s.started_at)} · 最終 ${agoSpan(s.updated_at)}前</summary>
+    <details data-id="${esc(s.id)}" ${evOpen}><summary>Events (${(s.events || []).length}) · started ${hhmmss(s.started_at)} · last ${agoSpan(s.updated_at)} ago</summary>
       <div class="events">${events}</div></details>
   </div>`;
 }
 
 function render() {
   if (authError) {
-    $("main").innerHTML = `<div class="notice">アクセストークンが無効です。端末で <code>tonberry-king url</code> を実行し、表示された URL を開いてください。</div>`;
+    $("main").innerHTML = `<div class="notice">Invalid access token. Run <code>tonberry-king url</code> in a terminal and open the printed URL.</div>`;
     return;
   }
   const hide = $("hideEnded").checked;
@@ -377,9 +377,9 @@ function render() {
 
   const visible = sessions.filter((s) => !(hide && s.status === "ended"));
   if (visible.length === 0) {
-    $("main").innerHTML = `<div class="empty">表示するセッションがありません。<br>
-      右上の「＋ 起動」から claude を起動するか、hooks に <code>tonberry-king hook</code> を設定して claude を起動してください。<br>
-      設定例は <code>tonberry-king hooks-config</code> で出力できます。</div>`;
+    $("main").innerHTML = `<div class="empty">No sessions to show.<br>
+      Launch claude with "+ Launch" at the top right, or configure <code>tonberry-king hook</code> in your hooks and start claude.<br>
+      Run <code>tonberry-king hooks-config</code> to print an example configuration.</div>`;
     return;
   }
 
@@ -400,13 +400,13 @@ function render() {
     const i = p.lastIndexOf("/");
     const branch = list.find((s) => s.branch)?.branch;
     return `<section class="group"><h2><span>${esc(p.slice(0, i + 1))}<b>${esc(p.slice(i + 1))}</b></span>
-      ${branch ? `<span>⎇ ${esc(branch)}</span>` : ""}<span>· ${list.length}件</span>
-      <button data-act="launch-here" data-dir="${esc(p)}" title="このディレクトリで新しく起動">＋ ここで起動</button></h2>
+      ${branch ? `<span>⎇ ${esc(branch)}</span>` : ""}<span>· ${list.length} ${list.length === 1 ? "session" : "sessions"}</span>
+      <button data-act="launch-here" data-dir="${esc(p)}" title="Launch a new session in this directory">+ Launch here</button></h2>
       <div class="cards">${list.map(card).join("")}</div></section>`;
   }).join("");
 }
 
-// ---- カード上のボタン ----
+// ---- card buttons ----
 async function runAction(act, id, el) {
   const s = sessions.find((x) => x.id === id);
   try {
@@ -417,7 +417,7 @@ async function runAction(act, id, el) {
       case "interrupt": await api("POST", `/api/sessions/${encodeURIComponent(id)}/stop`, { mode: "interrupt" }); break;
       case "exit": {
         const dir = (s?.cwd || "").split("/").pop();
-        if (!confirm(`${dir} の claude を終了しますか？`)) return;
+        if (!confirm(`Exit claude in ${dir}?`)) return;
         await api("POST", `/api/sessions/${encodeURIComponent(id)}/stop`, { mode: "exit" });
         break;
       }
@@ -440,7 +440,7 @@ $("main").addEventListener("toggle", (e) => {
   e.target.open ? openDetails.add(id) : openDetails.delete(id);
 }, true);
 
-// ---- 操作パネル ----
+// ---- control panel ----
 function openPanel(id) {
   if (panelId !== id) { $("pText").value = ""; $("screen").textContent = ""; }
   panelId = id;
@@ -467,21 +467,21 @@ function updatePanel() {
   if (!panelId) return;
   const s = sessions.find((x) => x.id === panelId);
   if (!s) {
-    // 起動中の仮セッションが実セッションに引き継がれたら追従する
+    // Follow the real session once a starting placeholder has been handed over.
     const prev = $("panel").dataset.pane;
     const next = prev && sessions.find((x) => x.tmux_pane === prev && x.status !== "ended");
     if (next) { panelId = next.id; return updatePanel(); }
-    $("pMsg").textContent = "セッションが一覧から削除されました";
+    $("pMsg").textContent = "The session was removed from the list";
     return;
   }
   $("panel").dataset.pane = s.tmux_pane || "";
   $("panel").className = `s-${s.status}`;
   $("pBadge").textContent = LABEL[s.status] || s.status;
   $("pDir").textContent = home(s.cwd);
-  $("pTitle").textContent = s.first_prompt || "(プロンプト未入力)";
+  $("pTitle").textContent = s.first_prompt || "(no prompt yet)";
   $("pMsg").textContent = s.message || "";
   $("pAttach").innerHTML = s.tmux_session
-    ? `端末から接続: <code class="mono">tmux attach -t ${esc(s.tmux_session)}</code> <button id="pCopy">コピー</button>` : "";
+    ? `Attach from a terminal: <code class="mono">tmux attach -t ${esc(s.tmux_session)}</code> <button id="pCopy">Copy</button>` : "";
   const ok = controllable(s);
   for (const b of $("panel").querySelectorAll(".keys button, #pSend, #pInterrupt, #pFit, #pAuto")) b.disabled = !ok;
   $("pExit").disabled = s.status === "ended";
@@ -490,7 +490,7 @@ $("panel").addEventListener("click", (e) => {
   if (e.target.id === "pCopy") {
     const s = sessions.find((x) => x.id === panelId);
     navigator.clipboard?.writeText(`tmux attach -t ${s.tmux_session}`);
-    e.target.textContent = "コピーしました";
+    e.target.textContent = "Copied";
     return;
   }
   const k = e.target.closest("button[data-key]");
@@ -499,12 +499,12 @@ $("panel").addEventListener("click", (e) => {
 
 async function refreshScreen() {
   const s = sessions.find((x) => x.id === panelId);
-  if (!s || !controllable(s)) { if (s?.status === "ended") $("screen").textContent = "（セッションは終了しました）"; return; }
+  if (!s || !controllable(s)) { if (s?.status === "ended") $("screen").textContent = "(session has ended)"; return; }
   try {
     const res = await api("GET", `/api/sessions/${encodeURIComponent(panelId)}/screen`);
     const text = await res.text();
     const size = res.headers.get("X-Pane-Size");
-    $("pSize").textContent = size ? `端末 ${size.replace("x", " 桁 × ")} 行` : "";
+    $("pSize").textContent = size ? `Terminal ${size.replace("x", " cols × ")} rows` : "";
     const el = $("screen");
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
     if (el.textContent !== text) {
@@ -512,7 +512,7 @@ async function refreshScreen() {
       if (atBottom) el.scrollTop = el.scrollHeight;
     }
   } catch (e) {
-    $("screen").textContent = `画面を取得できません: ${e.message}`;
+    $("screen").textContent = `Cannot capture the screen: ${e.message}`;
   }
 }
 
@@ -538,7 +538,7 @@ $("pText").addEventListener("keydown", (e) => {
 $("pInterrupt").addEventListener("click", () => panelId && runAction("interrupt", panelId));
 $("pExit").addEventListener("click", () => panelId && runAction("exit", panelId));
 
-// ---- パネル幅・端末の桁数・文字サイズ ----
+// ---- panel width, terminal columns, font size ----
 function setPanelWidth(px) {
   const w = Math.round(Math.min(Math.max(px, 360), window.innerWidth - 160));
   document.documentElement.style.setProperty("--panel-w", `${w}px`);
@@ -569,7 +569,7 @@ applyFont();
 $("pFontDown").addEventListener("click", () => { fontSize = Math.max(8, fontSize - 1); applyFont(); });
 $("pFontUp").addEventListener("click", () => { fontSize = Math.min(20, fontSize + 1); applyFont(); });
 
-// 画面表示欄に収まる桁数を、等幅フォント 1 文字の幅から計算する
+// Compute how many columns fit in the screen area from the monospace character width.
 function fitCols() {
   const pre = $("screen");
   const probe = document.createElement("span");
@@ -595,7 +595,7 @@ async function resizeTerm(body) {
 $("pFit").addEventListener("click", () => resizeTerm({ cols: fitCols() }));
 $("pAuto").addEventListener("click", () => resizeTerm({ auto: true }));
 
-// ---- 起動ダイアログ ----
+// ---- launch dialog ----
 function openLaunch(dir) {
   $("lErr").textContent = "";
   if (dir) $("lDir").value = dir;
@@ -626,25 +626,25 @@ $("launchForm").addEventListener("submit", async (e) => {
   }
 });
 
-// ---- ライブ更新 ----
+// ---- live updates ----
 function connect() {
   if (!token()) { authError = true; render(); return; }
   const es = new EventSource(`/api/events?token=${encodeURIComponent(token())}`);
-  es.onopen = () => { authError = false; $("conn").textContent = "● ライブ"; $("conn").className = "conn"; };
+  es.onopen = () => { authError = false; $("conn").textContent = "● Live"; $("conn").className = "conn"; };
   es.onmessage = (ev) => {
     sessions = JSON.parse(ev.data) || [];
     notifyTransitions();
     render();
   };
   es.onerror = async () => {
-    $("conn").textContent = "● 切断（再接続中）"; $("conn").className = "conn off";
-    // 401 の場合 EventSource は再接続しないので確認する
+    $("conn").textContent = "● Disconnected (reconnecting)"; $("conn").className = "conn off";
+    // EventSource does not tell us about 401, so check it explicitly.
     try { await api("GET", "/api/sessions"); } catch {}
     if (authError) es.close();
   };
 }
 connect();
-setInterval(() => { // 経過時間表示だけ更新（DOM は作り直さない）
+setInterval(() => { // Update elapsed times only (do not rebuild the DOM).
   for (const el of document.querySelectorAll(".ago")) el.textContent = ago(el.dataset.t);
 }, 5000);
 </script>

@@ -1,4 +1,4 @@
-// tonberry-king: Claude Code の複数セッションを localhost の Web 画面で一元監視する。
+// tonberry-king: a localhost dashboard to monitor and control multiple Claude Code sessions.
 package main
 
 import (
@@ -27,7 +27,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "hook":
-		// Claude Code の hook から呼ばれる。どんな場合でも Claude の動作を妨げないよう常に exit 0。
+		// Called from Claude Code hooks. Always exits 0 so it never interferes with Claude.
 		runHook(envOr("TONBERRY_ADDR", defaultAddr))
 	case "url":
 		token, err := loadOrCreateToken()

@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-// tmux で使える送信キー（任意キー送信は許可しない）
+// Keys that may be sent via tmux (arbitrary keys are not allowed).
 var allowedKeys = map[string]bool{
 	"Enter": true, "Escape": true, "Up": true, "Down": true, "Left": true, "Right": true,
 	"Tab": true, "BTab": true, "C-c": true, "1": true, "2": true, "3": true,
@@ -31,7 +31,7 @@ var unsafeName = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 func tmuxOutput(sock string, stdin []byte, args ...string) (string, error) {
 	bin, err := exec.LookPath("tmux")
 	if err != nil {
-		return "", errors.New("tmux が見つかりません（sudo apt install tmux）")
+		return "", errors.New("tmux not found (install it, e.g. sudo apt install tmux)")
 	}
 	if sock != "" {
 		args = append([]string{"-S", sock}, args...)
@@ -94,12 +94,12 @@ func expandDir(d string) (string, error) {
 		d = filepath.Join(home, strings.TrimPrefix(d, "~"))
 	}
 	if !filepath.IsAbs(d) {
-		return "", errors.New("ディレクトリは絶対パス（または ~/...）で指定してください")
+		return "", errors.New("directory must be an absolute path (or ~/...)")
 	}
 	d = filepath.Clean(d)
 	st, err := os.Stat(d)
 	if err != nil || !st.IsDir() {
-		return "", fmt.Errorf("ディレクトリが存在しません: %s", d)
+		return "", fmt.Errorf("directory does not exist: %s", d)
 	}
 	return d, nil
 }
@@ -121,7 +121,7 @@ func (c *controller) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 	bin, err := exec.LookPath(c.claudeBin)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, fmt.Errorf("claude が見つかりません: %v", err))
+		fail(w, http.StatusInternalServerError, fmt.Errorf("claude not found: %v", err))
 		return
 	}
 
@@ -152,7 +152,7 @@ func (c *controller) handleLaunch(w http.ResponseWriter, r *http.Request) {
 func (c *controller) target(w http.ResponseWriter, r *http.Request) (Session, bool) {
 	sess, ok := c.store.get(r.PathValue("id"))
 	if !ok {
-		fail(w, http.StatusNotFound, errors.New("セッションが見つかりません"))
+		fail(w, http.StatusNotFound, errors.New("session not found"))
 		return sess, false
 	}
 	return sess, true
@@ -160,11 +160,11 @@ func (c *controller) target(w http.ResponseWriter, r *http.Request) (Session, bo
 
 func (c *controller) requirePane(w http.ResponseWriter, sess Session) bool {
 	if sess.TmuxPane == "" {
-		fail(w, http.StatusConflict, errors.New("tmux 外で起動されたセッションには入力を送れません"))
+		fail(w, http.StatusConflict, errors.New("cannot send input to a session started outside tmux"))
 		return false
 	}
 	if sess.Status == StatusEnded {
-		fail(w, http.StatusConflict, errors.New("セッションは終了しています"))
+		fail(w, http.StatusConflict, errors.New("session has ended"))
 		return false
 	}
 	return true
@@ -185,7 +185,7 @@ func (c *controller) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	text := strings.ReplaceAll(strings.TrimRight(req.Text, "\r\n"), "\r\n", "\n")
 	if text != "" {
-		// bracketed paste で貼り付ける（改行で途中送信されないように）
+		// Paste with bracketed paste so newlines do not submit the prompt midway.
 		rb := make([]byte, 4)
 		rand.Read(rb)
 		buf := "tk-" + hex.EncodeToString(rb)
@@ -222,12 +222,12 @@ func (c *controller) handleKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.Keys) == 0 || len(req.Keys) > 10 {
-		fail(w, http.StatusBadRequest, errors.New("keys は 1〜10 個で指定してください"))
+		fail(w, http.StatusBadRequest, errors.New("keys must contain 1 to 10 entries"))
 		return
 	}
 	for _, k := range req.Keys {
 		if !allowedKeys[k] {
-			fail(w, http.StatusBadRequest, fmt.Errorf("送信できないキーです: %s", k))
+			fail(w, http.StatusBadRequest, fmt.Errorf("key not allowed: %s", k))
 			return
 		}
 	}
@@ -269,7 +269,7 @@ func (c *controller) handleStop(w http.ResponseWriter, r *http.Request) {
 				fail(w, http.StatusInternalServerError, err)
 				return
 			}
-			go func(pid int) { // 一定時間で終わらなければ強制終了
+			go func(pid int) { // Force kill if it does not exit within the grace period.
 				for i := 0; i < 50; i++ {
 					time.Sleep(100 * time.Millisecond)
 					if !isClaudeProcess(pid) {
@@ -284,12 +284,12 @@ func (c *controller) handleStop(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		default:
-			fail(w, http.StatusConflict, errors.New("停止できるプロセスが見つかりません"))
+			fail(w, http.StatusConflict, errors.New("no process to stop"))
 			return
 		}
 		c.store.logEvent(sess.ID, "WebExit", "")
 	default:
-		fail(w, http.StatusBadRequest, errors.New("mode は interrupt か exit を指定してください"))
+		fail(w, http.StatusBadRequest, errors.New("mode must be interrupt or exit"))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -312,7 +312,8 @@ func (c *controller) handleScreen(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, strings.TrimRight(out, "\n")+"\n")
 }
 
-// handleResize は tmux ウィンドウの桁数を変える。auto=true なら接続中の端末サイズに合わせる設定へ戻す。
+// handleResize changes the column count of the tmux window. With auto=true it
+// restores automatic sizing to the attached clients.
 func (c *controller) handleResize(w http.ResponseWriter, r *http.Request) {
 	sess, ok := c.target(w, r)
 	if !ok || !c.requirePane(w, sess) {
@@ -333,7 +334,7 @@ func (c *controller) handleResize(w http.ResponseWriter, r *http.Request) {
 	case req.Cols >= 40 && req.Cols <= 500:
 		args = append(args, "-x", strconv.Itoa(req.Cols))
 	default:
-		fail(w, http.StatusBadRequest, errors.New("cols は 40〜500 で指定してください"))
+		fail(w, http.StatusBadRequest, errors.New("cols must be between 40 and 500"))
 		return
 	}
 	if _, err := tmuxOutput(sess.TmuxSocket, nil, args...); err != nil {

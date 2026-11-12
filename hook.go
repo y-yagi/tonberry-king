@@ -18,8 +18,9 @@ var hookEvents = []string{
 	"PermissionRequest", "Notification", "Stop", "SubagentStop", "PreCompact", "SessionEnd",
 }
 
-// runHook は stdin の hook JSON に claude プロセスの PID / TTY を付与してサーバへ送る。
-// stdout には何も出さない（PreToolUse などで判定結果と解釈されないように）。
+// runHook adds the PID / TTY of the claude process to the hook JSON read from
+// stdin and sends it to the server. It never writes to stdout, so the output is
+// not interpreted as a decision (e.g. for PreToolUse).
 func runHook(addr string) {
 	defer func() { recover() }()
 
@@ -35,7 +36,7 @@ func runHook(addr string) {
 		payload["_pid"] = pid
 		payload["_tty"] = ttyOf(pid)
 	}
-	// tmux 内で動いていれば、Web から入力を送れるようにペイン情報を付与する
+	// When running inside tmux, attach the pane info so the dashboard can send input.
 	if pane := os.Getenv("TMUX_PANE"); pane != "" {
 		payload["_tmux_pane"] = pane
 		if t := os.Getenv("TMUX"); t != "" {
@@ -56,7 +57,7 @@ func runHook(addr string) {
 	}
 }
 
-// findClaudePID は親プロセスを遡って claude 本体の PID を探す（Linux の /proc 前提）。
+// findClaudePID walks up the parent processes to find the claude process (uses Linux /proc).
 func findClaudePID() int {
 	pid := os.Getppid()
 	for i := 0; i < 12 && pid > 1; i++ {
@@ -83,7 +84,7 @@ func parentOf(pid int) int {
 	if err != nil {
 		return 0
 	}
-	// comm に空白や括弧が含まれうるので最後の ')' 以降をパースする
+	// comm may contain spaces or parentheses, so parse after the last ')'.
 	s := string(b)
 	i := strings.LastIndexByte(s, ')')
 	if i < 0 {

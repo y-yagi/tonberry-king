@@ -112,7 +112,7 @@ func readToken() string {
 	return strings.TrimSpace(string(b))
 }
 
-// loadOrCreateToken は API 認証用トークンを読み込む（無ければ 0600 で作成する）。
+// loadOrCreateToken loads the API token, creating it with mode 0600 if missing.
 func loadOrCreateToken() (string, error) {
 	if t := readToken(); t != "" {
 		return t, nil
@@ -171,7 +171,7 @@ func (s *Store) setStatus(sess *Session, st string, now time.Time) {
 	}
 }
 
-// apply は hook イベント 1 件をセッション状態に反映する。
+// apply updates the session state from a single hook event.
 func (s *Store) apply(p map[string]any) {
 	id := str(p["session_id"])
 	if id == "" {
@@ -198,11 +198,11 @@ func (s *Store) apply(p map[string]any) {
 	}
 	if pid, ok := p["_pid"].(float64); ok && pid > 0 {
 		sess.PID = int(pid)
-		// /clear 等で同じプロセスが新しい session_id を使い始めたら、古い方は終了扱いにする
+		// If the same process starts using a new session_id (e.g. after /clear), mark the old one as ended.
 		for oid, o := range s.sessions {
 			if oid != id && o.PID == sess.PID && o.Status != StatusEnded {
 				s.setStatus(o, StatusEnded, now)
-				o.Message = "同じプロセスで新しいセッションが開始されました"
+				o.Message = "A new session was started in the same process"
 				o.UpdatedAt = now
 			}
 		}
@@ -215,7 +215,7 @@ func (s *Store) apply(p map[string]any) {
 		if sess.TmuxPane != pane || sess.TmuxSocket != sock {
 			sess.TmuxPane, sess.TmuxSocket, sess.TmuxSession = pane, sock, ""
 		}
-		// Web から起動した仮セッションを、実セッションに引き継ぐ
+		// Hand over a placeholder session launched from the dashboard to the real session.
 		for oid, o := range s.sessions {
 			if o.Status == StatusStarting && o.TmuxPane == pane && (o.TmuxSocket == "" || o.TmuxSocket == sock) {
 				sess.Launched = true
@@ -265,7 +265,7 @@ func (s *Store) apply(p map[string]any) {
 		tool := str(p["tool_name"])
 		sess.Tool = tool
 		sess.ToolDetail = summarizeToolInput(p["tool_input"])
-		sess.Message = "ツールの実行許可を待っています: " + tool
+		sess.Message = "Waiting for permission to use " + tool
 		s.setStatus(sess, StatusPermission, now)
 		detail = tool + ": " + truncate(sess.ToolDetail, 120)
 	case "Notification":
@@ -317,7 +317,7 @@ func (s *Store) addEventLocked(sess *Session, e Event) {
 	}
 }
 
-// addStarting は Web から起動した直後（まだ hook が届いていない）の仮セッションを登録する。
+// addStarting registers a placeholder session for a launch that has not sent any hook yet.
 func (s *Store) addStarting(name, pane, sock, dir, prompt string) *Session {
 	now := time.Now()
 	sess := &Session{
@@ -386,9 +386,9 @@ func (s *Store) loadBranch(id, cwd string) {
 	}
 }
 
-// loadLastAssistant は transcript(JSONL) の末尾から最後のアシスタント発言テキストを取り出す。
+// loadLastAssistant extracts the last assistant text from the end of the transcript (JSONL).
 func (s *Store) loadLastAssistant(id, path string) {
-	time.Sleep(400 * time.Millisecond) // transcript の書き込み完了を少し待つ
+	time.Sleep(400 * time.Millisecond) // wait briefly for the transcript to be flushed
 	text := lastAssistantText(path)
 	if text == "" {
 		return
@@ -459,12 +459,12 @@ func isClaudeProcess(pid int) bool {
 	return bytes.Contains(cmd, []byte("claude"))
 }
 
-// sweep はプロセスが消えたセッションを終了扱いにし、古い終了セッションを削除する。
+// sweep marks sessions whose process is gone as ended and removes old ended sessions.
 func (s *Store) sweep() {
 	now := time.Now()
 	_, procErr := os.Stat("/proc/self")
 
-	// 起動中の仮セッションは tmux ペインの生存を確認する（tmux 実行はロック外で）
+	// For starting placeholders, check the tmux pane is alive (run tmux outside the lock).
 	type paneRef struct{ id, sock, pane string }
 	var starting []paneRef
 	s.mu.Lock()
@@ -487,14 +487,14 @@ func (s *Store) sweep() {
 	for id, sess := range s.sessions {
 		if dead[id] && sess.Status == StatusStarting {
 			s.setStatus(sess, StatusEnded, now)
-			sess.Message = "tmux セッションが終了しました（起動に失敗した可能性があります）"
+			sess.Message = "tmux session ended (launch may have failed)"
 			sess.UpdatedAt = now
 			changed = true
 		}
 		if sess.Status != StatusEnded && sess.Status != StatusStarting && sess.PID > 0 && procErr == nil && !isClaudeProcess(sess.PID) {
 			s.setStatus(sess, StatusEnded, now)
 			sess.ToolRunning = false
-			sess.Message = "プロセスの終了を検知しました"
+			sess.Message = "Process exit detected"
 			sess.UpdatedAt = now
 			changed = true
 		}
@@ -530,7 +530,7 @@ func (s *Store) changedLocked() {
 	for ch := range s.subs {
 		select {
 		case ch <- snap:
-		default: // 遅いクライアントは古いスナップショットを捨てて最新だけ送る
+		default: // slow client: drop the stale snapshot and send only the latest
 			select {
 			case <-ch:
 			default:
@@ -606,8 +606,8 @@ func isLoopbackHost(h string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// guard は DNS rebinding 対策として Host ヘッダが loopback であることを要求し、
-// /api/ 配下はトークン（ヘッダ X-Tonberry-Token またはクエリ token）を必須にする。
+// guard requires a loopback Host header (DNS rebinding protection) and a token
+// for /api/ (X-Tonberry-Token header or token query parameter).
 func guard(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)
@@ -652,7 +652,7 @@ func serve(addr, statePath, claudeBin string) error {
 	sub, _ := fs.Sub(webFS, "web")
 	static := http.FileServerFS(sub)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		// 更新後に古い画面が残らないよう、毎回サーバに確認させる
+		// Always revalidate so an outdated page is not kept after an update.
 		w.Header().Set("Cache-Control", "no-cache")
 		static.ServeHTTP(w, r)
 	})
