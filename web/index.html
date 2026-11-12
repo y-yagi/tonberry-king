@@ -109,6 +109,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 .keys { display: flex; gap: 4px; flex-wrap: wrap; }
 .keys button { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .hint { color: var(--muted); font-size: 12px; }
+.suggest { display: flex; gap: 8px; align-items: center; font-size: 12.5px; min-width: 0; }
+.suggest[hidden] { display: none; }
+.sug-text { flex: 1; min-width: 0; color: var(--muted); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .err { color: var(--danger); font-size: 12px; min-height: 1em; }
 
 dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text);
@@ -178,6 +181,10 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
       <button data-key="2">2</button>
       <button data-key="3">3</button>
       <button data-key="C-c">Ctrl+C</button>
+    </div>
+    <div class="suggest" id="pSuggest" hidden>
+      <span class="label">Suggestion</span><span class="sug-text" id="pSugText"></span>
+      <button id="pSugUse" title="Put the suggestion in the input (Tab in an empty input)">Use (Tab)</button>
     </div>
     <textarea id="pText" rows="4" placeholder="Type an instruction (Ctrl+Enter to send)"></textarea>
     <div class="row">
@@ -438,7 +445,7 @@ $("main").addEventListener("click", (e) => {
 
 // ---- control panel ----
 function openPanel(id) {
-  if (panelId !== id) { $("pText").value = ""; $("screen").textContent = ""; }
+  if (panelId !== id) { $("pText").value = ""; $("screen").textContent = ""; setSuggestion(""); }
   panelId = id;
   $("panel").hidden = false;
   document.body.classList.add("panel-open");
@@ -504,6 +511,7 @@ $("panel").addEventListener("click", (e) => {
 async function refreshScreen() {
   const s = sessions.find((x) => x.id === panelId);
   if (!s || !controllable(s)) {
+    setSuggestion("");
     if (s?.status === "ended") $("screen").textContent = "(session has ended)";
     else if (s && !s.tmux_pane) $("screen").textContent = "(started outside tmux; use its terminal)";
     return;
@@ -512,6 +520,7 @@ async function refreshScreen() {
     const res = await api("GET", `/api/sessions/${encodeURIComponent(panelId)}/screen`);
     const text = await res.text();
     const size = res.headers.get("X-Pane-Size");
+    setSuggestion(decodeURIComponent((res.headers.get("X-Suggestion") || "").replace(/\+/g, " ")));
     $("pSize").textContent = size ? `Terminal ${size.replace("x", " cols × ")} rows` : "";
     const el = $("screen");
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
@@ -521,8 +530,25 @@ async function refreshScreen() {
     }
   } catch (e) {
     $("screen").textContent = `Cannot capture the screen: ${e.message}`;
+    setSuggestion("");
   }
 }
+
+// Prompt suggestion shown by Claude Code in its empty input box.
+let suggestion = "";
+function setSuggestion(text) {
+  suggestion = text;
+  $("pSuggest").hidden = !text;
+  $("pSugText").textContent = text;
+  $("pSugText").title = text;
+}
+function useSuggestion() {
+  if (!suggestion) return false;
+  $("pText").value = suggestion;
+  $("pText").focus();
+  return true;
+}
+$("pSugUse").addEventListener("click", useSuggestion);
 
 async function sendText() {
   const text = $("pText").value;
@@ -542,6 +568,7 @@ async function sendText() {
 $("pSend").addEventListener("click", sendText);
 $("pText").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); sendText(); }
+  if (e.key === "Tab" && !e.shiftKey && !e.isComposing && !$("pText").value && useSuggestion()) e.preventDefault();
 });
 $("pInterrupt").addEventListener("click", () => panelId && runAction("interrupt", panelId));
 $("pExit").addEventListener("click", () => panelId && runAction("exit", panelId));

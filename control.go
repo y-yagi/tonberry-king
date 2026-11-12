@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -308,8 +309,36 @@ func (c *controller) handleScreen(w http.ResponseWriter, r *http.Request) {
 	if size, err := tmuxOutput(sess.TmuxSocket, nil, "display-message", "-p", "-t", sess.TmuxPane, "#{pane_width}x#{pane_height}"); err == nil {
 		w.Header().Set("X-Pane-Size", strings.TrimSpace(size))
 	}
+	// Capture again with attributes to pick up the dimmed prompt suggestion.
+	if styled, err := tmuxOutput(sess.TmuxSocket, nil, "capture-pane", "-p", "-e", "-t", sess.TmuxPane); err == nil {
+		if sug := parseSuggestion(styled); sug != "" {
+			w.Header().Set("X-Suggestion", url.QueryEscape(sug))
+		}
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	io.WriteString(w, strings.TrimRight(out, "\n")+"\n")
+}
+
+// parseSuggestion extracts the prompt suggestion Claude Code shows as dim text
+// in an empty input box ("❯\u00a0" followed by an SGR 2 run). It returns "" when
+// the input box holds typed text or no suggestion is shown.
+func parseSuggestion(styled string) string {
+	const prompt = "❯\u00a0"
+	lines := strings.Split(styled, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		idx := strings.LastIndex(lines[i], prompt)
+		if idx < 0 {
+			continue
+		}
+		rest := lines[i][idx+len(prompt):]
+		body, ok := strings.CutPrefix(rest, "\x1b[2m")
+		if !ok {
+			return ""
+		}
+		text, _, _ := strings.Cut(body, "\x1b[")
+		return strings.TrimSpace(text)
+	}
+	return ""
 }
 
 // handleResize changes the column count of the tmux window. With auto=true it
