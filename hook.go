@@ -15,7 +15,7 @@ import (
 
 var hookEvents = []string{
 	"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-	"PermissionRequest", "Notification", "Stop", "SubagentStop", "PreCompact", "SessionEnd",
+	"PermissionRequest", "Notification", "Stop", "SubagentStart", "SubagentStop", "PreCompact", "SessionEnd",
 }
 
 // runHook adds the PID / TTY of the claude process to the hook JSON read from

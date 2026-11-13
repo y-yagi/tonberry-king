@@ -35,6 +35,7 @@ const (
 	StatusRunning    = "running"
 	StatusPermission = "waiting_permission"
 	StatusInput      = "waiting_input"
+	StatusSubagents  = "subagents" // the main turn ended but background subagents are still working
 	StatusCompacting = "compacting"
 	StatusEnded      = "ended"
 
@@ -49,29 +50,38 @@ type Event struct {
 	Detail string    `json:"detail,omitempty"`
 }
 
+// Subagent is a subagent the session started that has not finished yet.
+type Subagent struct {
+	ID          string `json:"id"`
+	Type        string `json:"type,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
 type Session struct {
-	ID             string    `json:"id"`
-	Cwd            string    `json:"cwd"`
-	Branch         string    `json:"branch,omitempty"`
-	TranscriptPath string    `json:"transcript_path,omitempty"`
-	PID            int       `json:"pid,omitempty"`
-	TTY            string    `json:"tty,omitempty"`
-	TmuxPane       string    `json:"tmux_pane,omitempty"`
-	TmuxSocket     string    `json:"tmux_socket,omitempty"`
-	TmuxSession    string    `json:"tmux_session,omitempty"`
-	Launched       bool      `json:"launched,omitempty"`
-	Status         string    `json:"status"`
-	FirstPrompt    string    `json:"first_prompt,omitempty"`
-	LastPrompt     string    `json:"last_prompt,omitempty"`
-	Tool           string    `json:"tool,omitempty"`
-	ToolDetail     string    `json:"tool_detail,omitempty"`
-	ToolRunning    bool      `json:"tool_running"`
-	Message        string    `json:"message,omitempty"`
-	LastAssistant  string    `json:"last_assistant,omitempty"`
-	StartedAt      time.Time `json:"started_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	StatusSince    time.Time `json:"status_since"`
-	Events         []Event   `json:"events"`
+	ID             string     `json:"id"`
+	Cwd            string     `json:"cwd"`
+	Branch         string     `json:"branch,omitempty"`
+	TranscriptPath string     `json:"transcript_path,omitempty"`
+	PID            int        `json:"pid,omitempty"`
+	TTY            string     `json:"tty,omitempty"`
+	TmuxPane       string     `json:"tmux_pane,omitempty"`
+	TmuxSocket     string     `json:"tmux_socket,omitempty"`
+	TmuxSession    string     `json:"tmux_session,omitempty"`
+	Launched       bool       `json:"launched,omitempty"`
+	Status         string     `json:"status"`
+	FirstPrompt    string     `json:"first_prompt,omitempty"`
+	LastPrompt     string     `json:"last_prompt,omitempty"`
+	Tool           string     `json:"tool,omitempty"`
+	ToolDetail     string     `json:"tool_detail,omitempty"`
+	ToolRunning    bool       `json:"tool_running"`
+	Message        string     `json:"message,omitempty"`
+	LastAssistant  string     `json:"last_assistant,omitempty"`
+	Subagents      []Subagent `json:"subagents,omitempty"`
+	TurnEnded      bool       `json:"turn_ended,omitempty"` // the main agent has finished its turn
+	StartedAt      time.Time  `json:"started_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	StatusSince    time.Time  `json:"status_since"`
+	Events         []Event    `json:"events"`
 }
 
 type Store struct {
@@ -164,6 +174,46 @@ func summarizeToolInput(in any) string {
 	return ""
 }
 
+// runningSubagents extracts the subagents that are still running from the
+// background_tasks field of a Stop payload. Background shells are ignored:
+// they may run indefinitely (e.g. dev servers) and do not mean claude is busy.
+func runningSubagents(tasks []any) []Subagent {
+	var out []Subagent
+	for _, t := range tasks {
+		m, ok := t.(map[string]any)
+		if !ok || str(m["type"]) != "subagent" || str(m["status"]) != "running" || str(m["id"]) == "" {
+			continue
+		}
+		out = append(out, Subagent{ID: str(m["id"]), Type: str(m["agent_type"]), Description: truncate(str(m["description"]), 200)})
+	}
+	return out
+}
+
+func (sess *Session) addSubagent(a Subagent) {
+	for _, x := range sess.Subagents {
+		if x.ID == a.ID {
+			return
+		}
+	}
+	sess.Subagents = append(sess.Subagents, a)
+}
+
+func (sess *Session) removeSubagent(id string) {
+	if id == "" {
+		return
+	}
+	out := sess.Subagents[:0]
+	for _, x := range sess.Subagents {
+		if x.ID != id {
+			out = append(out, x)
+		}
+	}
+	if len(out) == 0 {
+		out = nil
+	}
+	sess.Subagents = out
+}
+
 func (s *Store) setStatus(sess *Session, st string, now time.Time) {
 	if sess.Status != st {
 		sess.Status = st
@@ -232,12 +282,29 @@ func (s *Store) apply(p map[string]any) {
 	}
 	sess.UpdatedAt = now
 
+	// Events fired from inside a subagent carry agent_id. They tell us the
+	// subagent is alive, but they say nothing about the main agent's turn.
+	agentID := str(p["agent_id"])
+	if agentID != "" && ev != "SubagentStop" {
+		sess.addSubagent(Subagent{ID: agentID, Type: str(p["agent_type"])})
+	}
+	// busy is the status to show while work is in progress: if the main turn
+	// has already ended, the activity comes from background subagents.
+	busy := StatusRunning
+	if agentID != "" && sess.TurnEnded && len(sess.Subagents) > 0 {
+		busy = StatusSubagents
+	}
+	if agentID == "" && (ev == "PreToolUse" || ev == "PostToolUse") {
+		sess.TurnEnded = false
+	}
+
 	detail := ""
 	switch ev {
 	case "SessionStart":
 		s.setStatus(sess, StatusInput, now)
 		sess.Message = ""
 		sess.ToolRunning = false
+		sess.Subagents, sess.TurnEnded = nil, false
 		detail = str(p["source"])
 	case "UserPromptSubmit":
 		prompt := str(p["prompt"])
@@ -247,6 +314,7 @@ func (s *Store) apply(p map[string]any) {
 		sess.LastPrompt = truncate(prompt, 1000)
 		sess.Message = ""
 		sess.Tool, sess.ToolDetail, sess.ToolRunning = "", "", false
+		sess.TurnEnded = false
 		s.setStatus(sess, StatusRunning, now)
 		detail = truncate(prompt, 120)
 	case "PreToolUse":
@@ -254,12 +322,12 @@ func (s *Store) apply(p map[string]any) {
 		sess.ToolDetail = summarizeToolInput(p["tool_input"])
 		sess.ToolRunning = true
 		sess.Message = ""
-		s.setStatus(sess, StatusRunning, now)
+		s.setStatus(sess, busy, now)
 		detail = sess.Tool + ": " + truncate(sess.ToolDetail, 120)
 	case "PostToolUse":
 		sess.ToolRunning = false
 		sess.Message = ""
-		s.setStatus(sess, StatusRunning, now)
+		s.setStatus(sess, busy, now)
 		detail = str(p["tool_name"])
 	case "PermissionRequest":
 		tool := str(p["tool_name"])
@@ -276,7 +344,9 @@ func (s *Store) apply(p map[string]any) {
 		case typ == "permission_prompt" || strings.Contains(low, "permission"):
 			s.setStatus(sess, StatusPermission, now)
 		case typ == "idle_prompt" || strings.Contains(low, "waiting for your input"):
-			s.setStatus(sess, StatusInput, now)
+			if sess.Status != StatusSubagents {
+				s.setStatus(sess, StatusInput, now)
+			}
 		case typ == "elicitation_dialog":
 			s.setStatus(sess, StatusPermission, now)
 		}
@@ -285,13 +355,27 @@ func (s *Store) apply(p map[string]any) {
 	case "Stop":
 		sess.ToolRunning = false
 		sess.Message = ""
-		s.setStatus(sess, StatusInput, now)
+		sess.TurnEnded = true
+		if bg, ok := p["background_tasks"].([]any); ok {
+			sess.Subagents = runningSubagents(bg)
+		}
+		if len(sess.Subagents) > 0 {
+			s.setStatus(sess, StatusSubagents, now)
+		} else {
+			s.setStatus(sess, StatusInput, now)
+		}
 		if m := str(p["last_assistant_message"]); m != "" {
 			sess.LastAssistant = truncate(m, 2000)
 		} else if sess.TranscriptPath != "" {
 			go s.loadLastAssistant(id, sess.TranscriptPath)
 		}
+	case "SubagentStart":
+		detail = str(p["agent_type"])
 	case "SubagentStop":
+		// The main agent is woken up with the result and the following Stop
+		// settles the status, so only the bookkeeping is updated here.
+		sess.removeSubagent(agentID)
+		detail = str(p["agent_type"])
 	case "PreCompact":
 		s.setStatus(sess, StatusCompacting, now)
 		detail = str(p["trigger"])
@@ -299,6 +383,7 @@ func (s *Store) apply(p map[string]any) {
 		s.setStatus(sess, StatusEnded, now)
 		sess.ToolRunning = false
 		sess.Message = ""
+		sess.Subagents, sess.TurnEnded = nil, false
 		detail = str(p["reason"])
 	}
 
