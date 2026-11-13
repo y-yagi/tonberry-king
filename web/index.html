@@ -166,6 +166,14 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
       <button id="pFit" title="Resize the tmux window to fit the panel width">Fit terminal to panel</button>
       <button id="pAuto" title="Restore tmux automatic sizing (follow attached clients)">Auto size</button>
       <span class="spacer"></span>
+      <label class="meta" title="Include tmux scrollback above the visible screen">History
+        <select id="pHistory">
+          <option value="0">Visible only</option>
+          <option value="500">500 lines</option>
+          <option value="2000">2000 lines</option>
+          <option value="10000">10000 lines</option>
+        </select>
+      </label>
       <button id="pFontDown" title="Smaller text">A-</button>
       <button id="pFontUp" title="Larger text">A+</button>
     </div>
@@ -236,6 +244,7 @@ let firstLoad = true;
 let authError = false;
 let panelId = null;
 let screenTimer = null;
+let historyLines = 0; // scrollback lines to include in the screen capture
 
 const $ = (id) => document.getElementById(id);
 
@@ -517,7 +526,7 @@ async function refreshScreen() {
     return;
   }
   try {
-    const res = await api("GET", `/api/sessions/${encodeURIComponent(panelId)}/screen`);
+    const res = await api("GET", `/api/sessions/${encodeURIComponent(panelId)}/screen?history=${historyLines}`);
     const text = await res.text();
     const size = res.headers.get("X-Pane-Size");
     setSuggestion(decodeURIComponent((res.headers.get("X-Suggestion") || "").replace(/\+/g, " ")));
@@ -596,6 +605,17 @@ $("pResizer").addEventListener("pointerdown", (e) => {
   };
   r.addEventListener("pointermove", move);
   r.addEventListener("pointerup", up);
+});
+
+historyLines = Number(store.get("screenHistory")) || 0;
+$("pHistory").value = String(historyLines);
+if ($("pHistory").value === "") { historyLines = 0; $("pHistory").value = "0"; }
+$("pHistory").addEventListener("change", () => {
+  historyLines = Number($("pHistory").value) || 0;
+  store.set("screenHistory", String(historyLines));
+  const el = $("screen");
+  el.textContent = "";
+  refreshScreen().then(() => { el.scrollTop = el.scrollHeight; });
 });
 
 let fontSize = Number(store.get("screenFont")) || 12;

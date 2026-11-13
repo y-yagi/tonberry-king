@@ -296,12 +296,20 @@ func (c *controller) handleStop(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// maxScreenHistory caps how many scrollback lines /screen returns.
+const maxScreenHistory = 10000
+
 func (c *controller) handleScreen(w http.ResponseWriter, r *http.Request) {
 	sess, ok := c.target(w, r)
 	if !ok || !c.requirePane(w, sess) {
 		return
 	}
-	out, err := tmuxOutput(sess.TmuxSocket, nil, "capture-pane", "-p", "-t", sess.TmuxPane)
+	// history=N also includes up to N lines of tmux scrollback above the visible area.
+	args := []string{"capture-pane", "-p", "-t", sess.TmuxPane}
+	if n, err := strconv.Atoi(r.URL.Query().Get("history")); err == nil && n > 0 {
+		args = append(args, "-S", strconv.Itoa(-min(n, maxScreenHistory)))
+	}
+	out, err := tmuxOutput(sess.TmuxSocket, nil, args...)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
