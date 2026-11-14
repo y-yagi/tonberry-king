@@ -12,6 +12,7 @@
   --perm: #c2410c; --perm-bg: #fff1e6;
   --input: #047857; --input-bg: #e3f6ee;
   --compact: #7c3aed; --compact-bg: #f1eaff;
+  --sched: #4f46e5; --sched-bg: #eceafe;
   --start: #a16207; --start-bg: #fdf4d8;
   --ended: #6b7280; --ended-bg: #eef0f3;
   --code-bg: #f1f3f6; --term-bg: #15181e; --term-fg: #d7dce4;
@@ -25,6 +26,7 @@
     --perm: #ff9a5c; --perm-bg: #3d2416;
     --input: #4ade9b; --input-bg: #15352a;
     --compact: #b794ff; --compact-bg: #2c2245;
+    --sched: #a5a8ff; --sched-bg: #25264a;
     --start: #f5c451; --start-bg: #3a3014;
     --ended: #9aa3b2; --ended-bg: #262b34;
     --code-bg: #232833; --term-bg: #0b0d11; --term-fg: #d7dce4;
@@ -87,6 +89,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .notice { background: var(--perm-bg); color: var(--text); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; line-height: 1.8; }
 .s-running { --c: var(--run); --cb: var(--run-bg); }
 .s-subagents { --c: var(--sub); --cb: var(--sub-bg); }
+.s-scheduled { --c: var(--sched); --cb: var(--sched-bg); }
 .subs { margin: 0; padding-left: 1.2em; font-size: 12.5px; }
 .subs li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .s-waiting_permission { --c: var(--perm); --cb: var(--perm-bg); }
@@ -260,10 +263,11 @@ const LABEL = {
   starting: "Starting",
   running: "Running",
   subagents: "Subagents running",
+  scheduled: "Scheduled",
   compacting: "Compacting",
   ended: "Ended",
 };
-const ORDER = { waiting_permission: 0, waiting_input: 1, starting: 2, running: 3, subagents: 4, compacting: 5, ended: 6 };
+const ORDER = { waiting_permission: 0, waiting_input: 1, starting: 2, running: 3, subagents: 4, scheduled: 5, compacting: 6, ended: 7 };
 
 let sessions = [];
 let prevStatus = new Map();
@@ -371,6 +375,15 @@ function actionButtons(s) {
   return b;
 }
 
+// "in 4m" while the ScheduleWakeup is pending, "overdue by 1m" after it.
+function until(t) {
+  const s = Math.floor((new Date(t) - Date.now()) / 1000);
+  return s >= 0 ? `in ${ago(Date.now() - s * 1000)}` : `overdue by ${ago(Date.now() + s * 1000)}`;
+}
+const wakeText = (s) => s.wake_at
+  ? `Wakes up <span class="until" data-t="${esc(s.wake_at)}">${until(s.wake_at)}</span> (${hhmmss(s.wake_at)})`
+  : "Waiting for the scheduled wake-up";
+
 function subagentCount(s) {
   const n = (s.subagents || []).length;
   return n === 1 ? "1 subagent" : n ? `${n} subagents` : "subagents";
@@ -389,8 +402,10 @@ function card(s) {
   const activity = st === "running"
     ? (s.tool_running ? `<span class="pulse">⚙</span> ${esc(s.tool)}` : (s.tool ? `Thinking <span class="meta">(last: ${esc(s.tool)})</span>` : `<span class="pulse">…</span> Thinking`))
     : st === "subagents" ? `<span class="pulse">⚙</span> Waiting for ${subagentCount(s)} to finish`
+    : st === "scheduled" ? `⏰ ${wakeText(s)}`
     : st === "starting" ? `<span class="pulse">…</span> Waiting for claude to start (a trust prompt may appear for a new directory)` : "";
-  const subs = st === "subagents" ? subagentList(s) : "";
+  const subs = st === "subagents" ? subagentList(s)
+    : st === "scheduled" && s.wake_reason ? `<div class="meta" title="${esc(s.wake_reason)}">${esc(s.wake_reason)}</div>` : "";
   const toolBox = (st === "running" && s.tool_running && s.tool_detail) || (st === "waiting_permission" && s.tool_detail)
     ? `<div class="box mono">${esc(s.tool_detail)}</div>` : "";
 
@@ -558,8 +573,9 @@ function updatePanel() {
   $("panel").className = `s-${s.status}`;
   $("pBadge").textContent = LABEL[s.status] || s.status;
   $("pTitle").textContent = s.first_prompt || "(no prompt yet)";
-  $("pMsg").textContent = s.message || (s.status === "subagents"
-    ? `Waiting for ${subagentCount(s)} to finish: ${(s.subagents || []).map((a) => a.description || a.type || a.id).join(", ")}` : "");
+  $("pMsg").innerHTML = s.message ? esc(s.message)
+    : s.status === "subagents" ? esc(`Waiting for ${subagentCount(s)} to finish: ${(s.subagents || []).map((a) => a.description || a.type || a.id).join(", ")}`)
+    : s.status === "scheduled" ? `⏰ ${wakeText(s)}${s.wake_reason ? `: ${esc(s.wake_reason)}` : ""}` : "";
   $("pAttach").innerHTML = s.tmux_session
     ? `Attach from a terminal: <code class="mono">tmux attach -t ${esc(s.tmux_session)}</code> <button id="pCopy">Copy</button>` : "";
   const meta = [s.tmux_session ? "" : s.tty && `tty ${s.tty}`, s.pid && `pid ${s.pid}`, `id ${s.id.replace(/^launch-/, "").slice(0, 8)}`].filter(Boolean).join(" · ");
@@ -771,6 +787,7 @@ function connect() {
 connect();
 setInterval(() => { // Update elapsed times only (do not rebuild the DOM).
   for (const el of document.querySelectorAll(".ago")) el.textContent = ago(el.dataset.t);
+  for (const el of document.querySelectorAll(".until")) el.textContent = until(el.dataset.t);
 }, 5000);
 </script>
 </body>

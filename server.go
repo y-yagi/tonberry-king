@@ -36,6 +36,7 @@ const (
 	StatusPermission = "waiting_permission"
 	StatusInput      = "waiting_input"
 	StatusSubagents  = "subagents" // the main turn ended but background subagents are still working
+	StatusScheduled  = "scheduled" // the main turn ended with a ScheduleWakeup (/loop) and will resume by itself
 	StatusCompacting = "compacting"
 	StatusEnded      = "ended"
 
@@ -78,6 +79,8 @@ type Session struct {
 	LastAssistant  string     `json:"last_assistant,omitempty"`
 	Subagents      []Subagent `json:"subagents,omitempty"`
 	TurnEnded      bool       `json:"turn_ended,omitempty"` // the main agent has finished its turn
+	WakeAt         *time.Time `json:"wake_at,omitempty"`    // when a ScheduleWakeup of the current turn resumes the session
+	WakeReason     string     `json:"wake_reason,omitempty"`
 	StartedAt      time.Time  `json:"started_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 	StatusSince    time.Time  `json:"status_since"`
@@ -214,6 +217,21 @@ func (sess *Session) removeSubagent(id string) {
 	sess.Subagents = out
 }
 
+// scheduleWakeup records the wakeup a main-agent ScheduleWakeup call asks
+// for. The runtime clamps the delay to [60, 3600] seconds; stop: true ends
+// the loop, so no wakeup follows.
+func (sess *Session) scheduleWakeup(input any, now time.Time) {
+	m, _ := input.(map[string]any)
+	if stop, _ := m["stop"].(bool); stop {
+		sess.WakeAt, sess.WakeReason = nil, ""
+		return
+	}
+	d, _ := m["delaySeconds"].(float64)
+	d = min(max(d, 60), 3600)
+	t := now.Add(time.Duration(d) * time.Second)
+	sess.WakeAt, sess.WakeReason = &t, truncate(str(m["reason"]), 200)
+}
+
 func (s *Store) setStatus(sess *Session, st string, now time.Time) {
 	if sess.Status != st {
 		sess.Status = st
@@ -295,7 +313,15 @@ func (s *Store) apply(p map[string]any) {
 		busy = StatusSubagents
 	}
 	if agentID == "" && (ev == "PreToolUse" || ev == "PostToolUse") {
+		// The main agent is working again after its turn ended, so a wakeup
+		// from that turn has fired (or the session was woken another way).
+		if sess.TurnEnded {
+			sess.WakeAt, sess.WakeReason = nil, ""
+		}
 		sess.TurnEnded = false
+		if ev == "PreToolUse" && str(p["tool_name"]) == "ScheduleWakeup" {
+			sess.scheduleWakeup(p["tool_input"], now)
+		}
 	}
 
 	detail := ""
@@ -305,6 +331,7 @@ func (s *Store) apply(p map[string]any) {
 		sess.Message = ""
 		sess.ToolRunning = false
 		sess.Subagents, sess.TurnEnded = nil, false
+		sess.WakeAt, sess.WakeReason = nil, ""
 		detail = str(p["source"])
 	case "UserPromptSubmit":
 		prompt := str(p["prompt"])
@@ -315,6 +342,7 @@ func (s *Store) apply(p map[string]any) {
 		sess.Message = ""
 		sess.Tool, sess.ToolDetail, sess.ToolRunning = "", "", false
 		sess.TurnEnded = false
+		sess.WakeAt, sess.WakeReason = nil, ""
 		s.setStatus(sess, StatusRunning, now)
 		detail = truncate(prompt, 120)
 	case "PreToolUse":
@@ -344,7 +372,7 @@ func (s *Store) apply(p map[string]any) {
 		case typ == "permission_prompt" || strings.Contains(low, "permission"):
 			s.setStatus(sess, StatusPermission, now)
 		case typ == "idle_prompt" || strings.Contains(low, "waiting for your input"):
-			if sess.Status != StatusSubagents {
+			if sess.Status != StatusSubagents && sess.Status != StatusScheduled {
 				s.setStatus(sess, StatusInput, now)
 			}
 		case typ == "elicitation_dialog":
@@ -359,9 +387,12 @@ func (s *Store) apply(p map[string]any) {
 		if bg, ok := p["background_tasks"].([]any); ok {
 			sess.Subagents = runningSubagents(bg)
 		}
-		if len(sess.Subagents) > 0 {
+		switch {
+		case len(sess.Subagents) > 0:
 			s.setStatus(sess, StatusSubagents, now)
-		} else {
+		case sess.WakeAt != nil:
+			s.setStatus(sess, StatusScheduled, now)
+		default:
 			s.setStatus(sess, StatusInput, now)
 		}
 		if m := str(p["last_assistant_message"]); m != "" {
@@ -384,6 +415,7 @@ func (s *Store) apply(p map[string]any) {
 		sess.ToolRunning = false
 		sess.Message = ""
 		sess.Subagents, sess.TurnEnded = nil, false
+		sess.WakeAt, sess.WakeReason = nil, ""
 		detail = str(p["reason"])
 	}
 

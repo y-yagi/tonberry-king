@@ -51,3 +51,42 @@ func TestStopWithoutBackgroundTasks(t *testing.T) {
 		t.Fatalf("status = %q, want %q", got, StatusInput)
 	}
 }
+
+// A /loop turn that ends with ScheduleWakeup resumes by itself, so it must not
+// look like it is waiting for the user.
+func TestScheduledWakeupStatus(t *testing.T) {
+	s := newStore(filepath.Join(t.TempDir(), "sessions.json"))
+	const id = "sess"
+	wake := map[string]any{"delaySeconds": float64(270), "reason": "check the test run"}
+	steps := []struct {
+		payload map[string]any
+		want    string
+	}{
+		{map[string]any{"hook_event_name": "UserPromptSubmit", "prompt": "/loop check"}, StatusRunning},
+		{map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Bash"}, StatusRunning},
+		{map[string]any{"hook_event_name": "PostToolUse", "tool_name": "Bash"}, StatusRunning},
+		{map[string]any{"hook_event_name": "PreToolUse", "tool_name": "ScheduleWakeup", "tool_input": wake}, StatusRunning},
+		{map[string]any{"hook_event_name": "PostToolUse", "tool_name": "ScheduleWakeup"}, StatusRunning},
+		{map[string]any{"hook_event_name": "Stop"}, StatusScheduled},
+		{map[string]any{"hook_event_name": "Notification", "notification_type": "idle_prompt", "message": "Claude is waiting for your input"}, StatusScheduled},
+		// The wakeup fires and the agent works without scheduling another one.
+		{map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Read"}, StatusRunning},
+		{map[string]any{"hook_event_name": "PostToolUse", "tool_name": "Read"}, StatusRunning},
+		{map[string]any{"hook_event_name": "Stop"}, StatusInput},
+		// stop: true ends the loop.
+		{map[string]any{"hook_event_name": "UserPromptSubmit", "prompt": "/loop check"}, StatusRunning},
+		{map[string]any{"hook_event_name": "PreToolUse", "tool_name": "ScheduleWakeup", "tool_input": map[string]any{"stop": true}}, StatusRunning},
+		{map[string]any{"hook_event_name": "Stop"}, StatusInput},
+	}
+	for i, st := range steps {
+		st.payload["session_id"] = id
+		s.apply(st.payload)
+		sess := s.sessions[id]
+		if sess.Status != st.want {
+			t.Fatalf("step %d (%s): status = %q, want %q", i, st.payload["hook_event_name"], sess.Status, st.want)
+		}
+		if i == 5 && (sess.WakeAt == nil || sess.WakeReason != "check the test run") {
+			t.Fatalf("step %d: wake_at = %v, reason = %q", i, sess.WakeAt, sess.WakeReason)
+		}
+	}
+}
