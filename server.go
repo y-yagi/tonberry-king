@@ -266,9 +266,23 @@ func (s *Store) apply(p map[string]any) {
 	}
 	if pid, ok := p["_pid"].(float64); ok && pid > 0 {
 		sess.PID = int(pid)
-		// If the same process starts using a new session_id (e.g. after /clear), mark the old one as ended.
+		// After /clear the same process continues under a new session_id: hand
+		// the old session over to the new one so the dashboard keeps one card.
+		cleared := ev == "SessionStart" && str(p["source"]) == "clear"
+		// If the same process starts using a new session_id otherwise, mark the old one as ended.
 		for oid, o := range s.sessions {
-			if oid != id && o.PID == sess.PID && o.Status != StatusEnded {
+			if oid == id || o.PID != sess.PID {
+				continue
+			}
+			if cleared {
+				sess.Launched = sess.Launched || o.Launched
+				if sess.TmuxSession == "" && o.TmuxPane != "" && o.TmuxPane == str(p["_tmux_pane"]) {
+					sess.TmuxPane, sess.TmuxSocket, sess.TmuxSession = o.TmuxPane, o.TmuxSocket, o.TmuxSession
+				}
+				delete(s.sessions, oid)
+				continue
+			}
+			if o.Status != StatusEnded {
 				s.setStatus(o, StatusEnded, now)
 				o.Message = "A new session was started in the same process"
 				o.UpdatedAt = now
