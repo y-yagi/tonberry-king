@@ -125,6 +125,14 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
 dialog h3 { margin: 0 0 12px; font-size: 15px; }
 dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.label-row { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.label-row button { font-size: 11px; padding: 1px 8px; }
+#lastDlg { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0;
+  padding: 0; display: none; flex-direction: column; }
+#lastDlg[open] { display: flex; }
+#lastDlg .ld-head { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+#lastDlg .ld-body { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 16px 20px; white-space: pre-wrap;
+  word-break: break-word; font-size: var(--ld-font, 14px); line-height: 1.6; }
 
 @media (max-width: 900px) {
   #panel { width: 100vw; }
@@ -209,10 +217,23 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
     </div>
     <div class="err" id="pErr"></div>
     <div id="pPrompt" hidden><div class="label">Latest instruction</div><div class="box"></div></div>
-    <div id="pLast" hidden><div class="label">Last response</div><div class="box"></div></div>
+    <div id="pLast" hidden><div class="label-row"><span class="label">Last response</span><button id="pLastFull" title="Show the last response full screen">⛶ Full screen</button></div><div class="box"></div></div>
     <details id="pEvents"><summary></summary><div class="events"></div></details>
   </div>
 </aside>
+
+<dialog id="lastDlg">
+  <div class="ld-head">
+    <b>Last response</b>
+    <span class="meta" id="ldDir"></span>
+    <span class="spacer"></span>
+    <button id="ldFontDown" title="Smaller text">A-</button>
+    <button id="ldFontUp" title="Larger text">A+</button>
+    <button id="ldCopy">Copy</button>
+    <button id="ldClose" title="Close (Esc)">✕</button>
+  </div>
+  <div class="ld-body" id="ldBody"></div>
+</dialog>
 
 <dialog id="launchDlg">
   <form id="launchForm" method="dialog">
@@ -489,13 +510,38 @@ function openPanel(id) {
 }
 function closePanel() {
   panelId = null;
+  if ($("lastDlg").open) $("lastDlg").close();
   clearInterval(screenTimer);
   $("panel").hidden = true;
   document.body.classList.remove("panel-open");
   render();
 }
 $("pClose").addEventListener("click", closePanel);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && panelId && document.activeElement !== $("pText") && !$("launchDlg").open) closePanel(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && panelId && document.activeElement !== $("pText") && !$("launchDlg").open && !$("lastDlg").open) closePanel(); });
+
+// Full-screen view of the last response.
+let ldFont = Number(store.get("ldFont")) || 14;
+function applyLdFont() { $("lastDlg").style.setProperty("--ld-font", `${ldFont}px`); store.set("ldFont", ldFont); }
+function syncLastDlg() {
+  if (!$("lastDlg").open) return;
+  const text = $("pLast").querySelector(".box").textContent;
+  if ($("ldBody").textContent !== text) $("ldBody").textContent = text;
+  $("ldDir").textContent = $("pDir").textContent;
+}
+$("pLastFull").addEventListener("click", () => {
+  applyLdFont();
+  $("lastDlg").showModal();
+  syncLastDlg();
+  $("ldBody").scrollTop = 0;
+});
+$("ldClose").addEventListener("click", () => $("lastDlg").close());
+$("ldFontDown").addEventListener("click", () => { ldFont = Math.max(10, ldFont - 1); applyLdFont(); });
+$("ldFontUp").addEventListener("click", () => { ldFont = Math.min(28, ldFont + 1); applyLdFont(); });
+$("ldCopy").addEventListener("click", (e) => {
+  navigator.clipboard?.writeText($("ldBody").textContent);
+  e.target.textContent = "Copied";
+  setTimeout(() => { e.target.textContent = "Copy"; }, 1500);
+});
 
 function updatePanel() {
   if (!panelId) return;
@@ -521,6 +567,7 @@ function updatePanel() {
   const setBox = (id, text) => { $(id).hidden = !text; $(id).querySelector(".box").textContent = text || ""; };
   setBox("pPrompt", s.last_prompt && s.last_prompt !== s.first_prompt ? s.last_prompt : "");
   setBox("pLast", s.status !== "running" ? s.last_assistant : "");
+  syncLastDlg();
   $("pEvents").querySelector("summary").innerHTML =
     `Events (${(s.events || []).length}) · started ${hhmmss(s.started_at)} · last ${agoSpan(s.updated_at)} ago`;
   $("pEvents").querySelector(".events").innerHTML = (s.events || []).slice().reverse().map((e) =>
