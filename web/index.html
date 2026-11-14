@@ -56,7 +56,9 @@ textarea { resize: vertical; min-height: 4.5em; }
 .conn { font-size: 12px; color: var(--muted); }
 .conn.off { color: var(--perm); }
 main { padding: 16px 20px 40px; max-width: 1400px; margin: 0 auto; }
-body.panel-open main { margin-right: var(--panel-w, min(680px, 50vw)); max-width: none; }
+/* keep at least one card column visible next to the panel */
+body { --pw: min(var(--panel-w, min(680px, 50vw)), calc(100vw - 280px)); }
+body.panel-open main { margin-right: var(--pw); max-width: none; }
 .group { margin-bottom: 22px; }
 .group h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
@@ -101,7 +103,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 @keyframes pulse { 50% { opacity: .45; } }
 
 /* control panel */
-#panel { position: fixed; top: var(--header-h, 52px); right: 0; bottom: 0; width: var(--panel-w, min(680px, 50vw)); z-index: 3;
+#panel { position: fixed; top: var(--header-h, 52px); right: 0; bottom: 0; width: var(--pw); z-index: 3;
   background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column;
   box-shadow: -6px 0 24px rgba(0,0,0,.08); }
 #panel[hidden] { display: none; }
@@ -137,7 +139,7 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
 #lastDlg .ld-body { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 16px 20px; white-space: pre-wrap;
   word-break: break-word; font-size: var(--ld-font, 14px); line-height: 1.6; }
 
-@media (max-width: 900px) {
+@media (max-width: 640px) {
   #panel { width: 100vw; }
   .resizer { display: none; }
   body.panel-open main { margin-right: 0; }
