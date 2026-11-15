@@ -960,7 +960,8 @@ func serve(cfg serveConfig) error {
 	}
 
 	store := newStore(cfg.statePath)
-	ctl := &controller{store: store, claudeBin: cfg.claudeBin}
+	prompts := newPromptStore(filepath.Join(filepath.Dir(cfg.statePath), "prompts.json"))
+	ctl := &controller{store: store, claudeBin: cfg.claudeBin, prompts: prompts}
 	pcToken := func() string { return token }
 	mux := newMux(store, ctl, false, func(r *http.Request) bool { return tokenMatches(r, pcToken()) })
 

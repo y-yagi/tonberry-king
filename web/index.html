@@ -138,6 +138,9 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
 dialog h3 { margin: 0 0 12px; font-size: 15px; }
 dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.prompt-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.prompt-tools select { font: inherit; font-size: 12px; flex: 1 1 160px; min-width: 0; padding: 3px 6px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); }
 .label-row { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
 .label-row button { font-size: 11px; padding: 1px 8px; }
 #lastDlg { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0;
@@ -261,6 +264,12 @@ body.remote .pc-only { display: none !important; }
     <input type="text" id="lDir" list="dirList" required placeholder="~/src/github.com/...">
     <datalist id="dirList"></datalist>
     <label for="lPrompt">Initial instruction (optional)</label>
+    <div class="prompt-tools">
+      <select id="lTemplate" title="Insert a saved template"><option value="">Templates…</option></select>
+      <select id="lRecent" title="Insert a recently used instruction"><option value="">Recent…</option></select>
+      <button type="button" id="lSaveTpl" title="Save the instruction below as a template">Save as template</button>
+      <button type="button" id="lDelPrompt" title="Delete the selected template or recent entry" hidden>Delete</button>
+    </div>
     <textarea id="lPrompt" rows="4"></textarea>
     <label for="lArgs">Extra arguments (optional)</label>
     <input type="text" id="lArgs" placeholder="e.g. --model sonnet --permission-mode acceptEdits">
@@ -775,7 +784,58 @@ function openLaunch(dir) {
   $("lArgs").value = $("lArgs").value || store.get("lastArgs") || "";
   $("launchDlg").showModal();
   (dir ? $("lPrompt") : $("lDir")).focus();
+  loadPrompts();
 }
+
+// ---- instruction templates / recent instructions ----
+let prompts = { templates: [], recent: [] };
+const oneLine = (t, n = 80) => { t = t.replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
+function renderPrompts() {
+  $("lTemplate").innerHTML = `<option value="">Templates…${prompts.templates.length ? "" : " (none)"}</option>` +
+    prompts.templates.map((t, i) => `<option value="${i}" title="${esc(t.text)}">${esc(t.name)}</option>`).join("");
+  $("lRecent").innerHTML = `<option value="">Recent…${prompts.recent.length ? "" : " (none)"}</option>` +
+    prompts.recent.map((t, i) => `<option value="${i}" title="${esc(t)}">${esc(oneLine(t))}</option>`).join("");
+  $("lDelPrompt").hidden = true;
+}
+async function loadPrompts() {
+  try { prompts = await (await api("GET", "/api/prompts")).json(); renderPrompts(); } catch {}
+}
+function pickPrompt(sel, other, text) {
+  $(other).value = "";
+  if (sel.value === "") { $("lDelPrompt").hidden = true; return; }
+  const cur = $("lPrompt").value.trim();
+  if (cur && cur !== text && !confirm("Replace the current instruction?")) { sel.value = ""; return; }
+  $("lPrompt").value = text;
+  $("lDelPrompt").hidden = false;
+  $("lPrompt").focus();
+}
+$("lTemplate").addEventListener("change", (e) => pickPrompt(e.target, "lRecent", prompts.templates[e.target.value]?.text ?? ""));
+$("lRecent").addEventListener("change", (e) => pickPrompt(e.target, "lTemplate", prompts.recent[e.target.value] ?? ""));
+$("lSaveTpl").addEventListener("click", async () => {
+  const text = $("lPrompt").value.trim();
+  if (!text) { $("lErr").textContent = "Type an instruction to save as a template"; return; }
+  const sel = prompts.templates[$("lTemplate").value];
+  const name = prompt("Template name (an existing name is overwritten)", sel ? sel.name : oneLine(text, 30));
+  if (!name || !name.trim()) return;
+  try {
+    prompts = await (await api("PUT", "/api/prompts/templates", { name: name.trim(), text })).json();
+    renderPrompts();
+    $("lErr").textContent = "";
+  } catch (err) { $("lErr").textContent = err.message; }
+});
+$("lDelPrompt").addEventListener("click", async () => {
+  const t = prompts.templates[$("lTemplate").value];
+  const r = prompts.recent[$("lRecent").value];
+  try {
+    if (t) {
+      if (!confirm(`Delete template "${t.name}"?`)) return;
+      prompts = await (await api("POST", "/api/prompts/templates/delete", { name: t.name })).json();
+    } else if (r !== undefined) {
+      prompts = await (await api("POST", "/api/prompts/recent/delete", { text: r })).json();
+    } else return;
+    renderPrompts();
+  } catch (err) { $("lErr").textContent = err.message; }
+});
 $("launchBtn").addEventListener("click", () => openLaunch());
 $("lCancel").addEventListener("click", () => $("launchDlg").close());
 $("launchForm").addEventListener("submit", async (e) => {

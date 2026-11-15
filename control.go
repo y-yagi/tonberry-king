@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -63,12 +64,16 @@ func paneAlive(sock, pane string) bool {
 type controller struct {
 	store     *Store
 	claudeBin string
-	remote    bool // serves the remote (phone) listener: no launch, actions are tagged in the event log
+	remote    bool         // serves the remote (phone) listener: no launch, actions are tagged in the event log
+	prompts   *promptStore // templates and recent initial instructions (PC only; may be nil)
 }
 
 func (c *controller) routes(mux *http.ServeMux) {
 	if !c.remote {
 		mux.HandleFunc("POST /api/launch", c.handleLaunch)
+		if c.prompts != nil {
+			c.prompts.routes(mux)
+		}
 	}
 	mux.HandleFunc("POST /api/sessions/{id}/send", c.handleSend)
 	mux.HandleFunc("POST /api/sessions/{id}/keys", c.handleKeys)
@@ -159,6 +164,11 @@ func (c *controller) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 	pane, sock, _ := strings.Cut(strings.TrimSpace(out), "\t")
 	sess := c.store.addStarting(name, pane, sock, dir, req.Prompt)
+	if c.prompts != nil {
+		if err := c.prompts.addRecent(req.Prompt); err != nil {
+			log.Printf("save recent prompt: %v", err)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": sess.ID, "tmux_session": name})
 }
 
