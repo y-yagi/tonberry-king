@@ -40,7 +40,11 @@ const (
 	StatusCompacting = "compacting"
 	StatusEnded      = "ended"
 
-	maxEvents    = 100
+	maxEvents = 100
+	// maxLastResp caps the stored last response. It is generous so that the
+	// panel and the full-screen view show the whole reply, while still bounding
+	// a pathological message.
+	maxLastResp  = 100_000
 	endedTTL     = 24 * time.Hour
 	livenessTick = 3 * time.Second
 	authRecheck  = 2 * time.Second // how often an open event stream re-checks its token
@@ -451,7 +455,7 @@ func (s *Store) apply(p map[string]any) {
 			s.setStatus(sess, StatusInput, now)
 		}
 		if m := str(p["last_assistant_message"]); m != "" {
-			sess.LastAssistant = truncate(m, 2000)
+			sess.LastAssistant = truncate(m, maxLastResp)
 		} else if sess.TranscriptPath != "" {
 			go s.loadLastAssistant(id, sess.TranscriptPath)
 		}
@@ -574,7 +578,7 @@ func (s *Store) loadLastAssistant(id, path string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sess, ok := s.sessions[id]; ok {
-		sess.LastAssistant = truncate(text, 2000)
+		sess.LastAssistant = truncate(text, maxLastResp)
 		s.changedLocked()
 	}
 }
