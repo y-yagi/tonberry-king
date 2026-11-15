@@ -278,7 +278,7 @@ const LABEL = {
   waiting_input: "Waiting for input",
   starting: "Starting",
   running: "Running",
-  subagents: "Subagents running",
+  subagents: "Background running",
   scheduled: "Scheduled",
   compacting: "Compacting",
   ended: "Ended",
@@ -400,9 +400,15 @@ const wakeText = (s) => s.wake_at
   ? `Wakes up <span class="until" data-t="${esc(s.wake_at)}">${until(s.wake_at)}</span> (${hhmmss(s.wake_at)})`
   : "Waiting for the scheduled wake-up";
 
+// e.g. "1 subagent, 1 shell, 2 monitors"
 function subagentCount(s) {
-  const n = (s.subagents || []).length;
-  return n === 1 ? "1 subagent" : n ? `${n} subagents` : "subagents";
+  const counts = new Map();
+  for (const a of s.subagents || []) {
+    const k = a.kind || "subagent";
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  if (!counts.size) return "background tasks";
+  return [...counts].map(([k, n]) => `${n} ${k}${n === 1 ? "" : "s"}`).join(", ");
 }
 function subagentList(s) {
   const items = (s.subagents || []).map((a) => {

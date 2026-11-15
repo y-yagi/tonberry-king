@@ -28,7 +28,10 @@ func TestBackgroundSubagentStatus(t *testing.T) {
 		{map[string]any{"hook_event_name": "Notification", "notification_type": "idle_prompt", "message": "Claude is waiting for your input"}, StatusSubagents},
 		{map[string]any{"hook_event_name": "SubagentStop", "agent_id": "a1"}, StatusSubagents},
 		// The main agent is woken up with the result and finishes its turn.
-		{map[string]any{"hook_event_name": "Stop", "background_tasks": []any{shell}}, StatusInput},
+		// A background shell is still running, so claude will resume when it exits.
+		{map[string]any{"hook_event_name": "Stop", "background_tasks": []any{shell}}, StatusSubagents},
+		{map[string]any{"hook_event_name": "Notification", "notification_type": "idle_prompt", "message": "Claude is waiting for your input"}, StatusSubagents},
+		{map[string]any{"hook_event_name": "Stop", "background_tasks": []any{}}, StatusInput},
 	}
 	for i, st := range steps {
 		st.payload["session_id"] = id
@@ -88,5 +91,27 @@ func TestScheduledWakeupStatus(t *testing.T) {
 		if i == 5 && (sess.WakeAt == nil || sess.WakeReason != "check the test run") {
 			t.Fatalf("step %d: wake_at = %v, reason = %q", i, sess.WakeAt, sess.WakeReason)
 		}
+	}
+}
+
+// "1 shell, 1 monitor still running" must not be shown as waiting for input.
+func TestBackgroundShellAndMonitorStatus(t *testing.T) {
+	s := newStore(filepath.Join(t.TempDir(), "sessions.json"))
+	shell := map[string]any{"id": "b1", "type": "shell", "status": "running", "description": "go test ./..."}
+	mon := map[string]any{"id": "m1", "type": "monitor", "status": "running", "description": "watch CI"}
+	done := map[string]any{"id": "b0", "type": "shell", "status": "completed", "description": "ls"}
+	for _, ev := range []string{"UserPromptSubmit", "Stop"} {
+		p := map[string]any{"session_id": "x", "hook_event_name": ev}
+		if ev == "Stop" {
+			p["background_tasks"] = []any{shell, mon, done}
+		}
+		s.apply(p)
+	}
+	sess := s.sessions["x"]
+	if sess.Status != StatusSubagents {
+		t.Fatalf("status = %q, want %q", sess.Status, StatusSubagents)
+	}
+	if len(sess.Subagents) != 2 || sess.Subagents[0].Kind != "shell" || sess.Subagents[1].Kind != "monitor" {
+		t.Fatalf("background tasks = %+v, want the running shell and monitor", sess.Subagents)
 	}
 }

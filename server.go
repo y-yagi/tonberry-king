@@ -56,9 +56,11 @@ type Event struct {
 	Detail string    `json:"detail,omitempty"`
 }
 
-// Subagent is a subagent the session started that has not finished yet.
+// Subagent is a background task (a subagent, shell, monitor, ...) the session
+// started that has not finished yet.
 type Subagent struct {
 	ID          string `json:"id"`
+	Kind        string `json:"kind,omitempty"` // background task type; empty means subagent
 	Type        string `json:"type,omitempty"`
 	Description string `json:"description,omitempty"`
 }
@@ -222,17 +224,24 @@ func summarizeToolInput(in any) string {
 	return ""
 }
 
-// runningSubagents extracts the subagents that are still running from the
-// background_tasks field of a Stop payload. Background shells are ignored:
-// they may run indefinitely (e.g. dev servers) and do not mean claude is busy.
-func runningSubagents(tasks []any) []Subagent {
+// runningBackground extracts the background tasks that are still running from
+// the background_tasks field of a Stop payload. Shells and monitors count as
+// well as subagents: claude resumes by itself when they finish or report, so
+// the session is not simply waiting for the user.
+func runningBackground(tasks []any) []Subagent {
 	var out []Subagent
 	for _, t := range tasks {
 		m, ok := t.(map[string]any)
-		if !ok || str(m["type"]) != "subagent" || str(m["status"]) != "running" || str(m["id"]) == "" {
+		if !ok || str(m["status"]) != "running" || str(m["id"]) == "" {
 			continue
 		}
-		out = append(out, Subagent{ID: str(m["id"]), Type: str(m["agent_type"]), Description: truncate(str(m["description"]), 200)})
+		a := Subagent{ID: str(m["id"]), Description: truncate(str(m["description"]), 200)}
+		if kind := str(m["type"]); kind == "subagent" || kind == "" {
+			a.Type = str(m["agent_type"])
+		} else {
+			a.Kind, a.Type = kind, kind
+		}
+		out = append(out, a)
 	}
 	return out
 }
@@ -444,7 +453,7 @@ func (s *Store) apply(p map[string]any) {
 		sess.Message = ""
 		sess.TurnEnded = true
 		if bg, ok := p["background_tasks"].([]any); ok {
-			sess.Subagents = runningSubagents(bg)
+			sess.Subagents = runningBackground(bg)
 		}
 		switch {
 		case len(sess.Subagents) > 0:
