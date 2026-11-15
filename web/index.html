@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1d4ed8">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tonberry">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
 <title>Tonberry King</title>
 <style>
 :root {
@@ -147,7 +154,13 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
 @media (max-width: 600px) {
   header, main { padding-left: 12px; padding-right: 12px; }
   .cards { grid-template-columns: 1fr; }
+  .keys { gap: 6px; }
+  .keys button, #pSend, #pInterrupt, #pExit { min-height: 40px; min-width: 44px; }
 }
+/* The remote (phone) listener does not allow launching or removing sessions. */
+body.remote .pc-only { display: none !important; }
+.token-form { display: flex; gap: 6px; margin-top: 10px; }
+.token-form input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>
 </head>
 <body>
@@ -156,9 +169,9 @@ dialog label { display: block; font-size: 12px; color: var(--muted); margin: 10p
   <div class="counts" id="counts"></div>
   <div class="spacer"></div>
   <div class="controls">
-    <button class="primary" id="launchBtn">+ Launch</button>
+    <button class="primary pc-only" id="launchBtn">+ Launch</button>
     <label><input type="checkbox" id="hideEnded"> Hide ended</label>
-    <button id="clearEnded">Clear ended</button>
+    <button class="pc-only" id="clearEnded">Clear ended</button>
     <button id="notifyBtn">Enable notifications</button>
     <span class="conn" id="conn">Connecting…</span>
   </div>
@@ -361,7 +374,7 @@ function notifyTransitions() {
 
 function actionButtons(s) {
   const st = s.status;
-  if (st === "ended") return `<button data-act="delete" data-id="${esc(s.id)}" title="Remove from the list">Remove</button>`;
+  if (st === "ended") return `<button class="pc-only" data-act="delete" data-id="${esc(s.id)}" title="Remove from the list">Remove</button>`;
   const id = esc(s.id);
   if (!s.tmux_pane) {
     return `<span class="meta">Outside tmux</span>
@@ -430,7 +443,16 @@ function card(s) {
 
 function render() {
   if (authError) {
-    $("main").innerHTML = `<div class="notice">Invalid access token. Run <code>tonberry-king url</code> in a terminal and open the printed URL.</div>`;
+    const cmd = location.protocol === "https:" ? "tonberry-king url -remote" : "tonberry-king url";
+    $("main").innerHTML = `<div class="notice">Invalid access token. Run <code>${cmd}</code> in a terminal and open the printed URL.
+      <br>Or paste the token (the part after <code>#token=</code>) here:
+      <form class="token-form" id="tokenForm"><input id="tokenInput" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="token">
+      <button type="submit" class="primary">Save</button></form></div>`;
+    $("tokenForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const t = $("tokenInput").value.trim().replace(/^.*#token=/, "");
+      if (/^[0-9a-f]+$/.test(t)) { store.set("token", t); location.reload(); }
+    });
     return;
   }
   const hide = $("hideEnded").checked;
@@ -473,7 +495,7 @@ function render() {
     const branch = list.find((s) => s.branch)?.branch;
     return `<section class="group"><h2><span>${esc(p.slice(0, i + 1))}<b>${esc(p.slice(i + 1))}</b></span>
       ${branch ? `<span>⎇ ${esc(branch)}</span>` : ""}<span>· ${list.length} ${list.length === 1 ? "session" : "sessions"}</span>
-      <button data-act="launch-here" data-dir="${esc(p)}" title="Launch a new session in this directory">+ Launch here</button></h2>
+      <button class="pc-only" data-act="launch-here" data-dir="${esc(p)}" title="Launch a new session in this directory">+ Launch here</button></h2>
       <div class="cards">${list.map(card).join("")}</div></section>`;
   }).join("");
 }
@@ -770,8 +792,15 @@ $("launchForm").addEventListener("submit", async (e) => {
 });
 
 // ---- live updates ----
+async function loadInfo() {
+  try {
+    const info = await (await api("GET", "/api/info")).json();
+    document.body.classList.toggle("remote", !!info.remote);
+  } catch {}
+}
 function connect() {
   if (!token()) { authError = true; render(); return; }
+  loadInfo();
   const es = new EventSource(`/api/events?token=${encodeURIComponent(token())}`);
   es.onopen = () => { authError = false; $("conn").textContent = "● Live"; $("conn").className = "conn"; };
   es.onmessage = (ev) => {

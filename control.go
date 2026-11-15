@@ -63,15 +63,27 @@ func paneAlive(sock, pane string) bool {
 type controller struct {
 	store     *Store
 	claudeBin string
+	remote    bool // serves the remote (phone) listener: no launch, actions are tagged in the event log
 }
 
 func (c *controller) routes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/launch", c.handleLaunch)
+	if !c.remote {
+		mux.HandleFunc("POST /api/launch", c.handleLaunch)
+	}
 	mux.HandleFunc("POST /api/sessions/{id}/send", c.handleSend)
 	mux.HandleFunc("POST /api/sessions/{id}/keys", c.handleKeys)
 	mux.HandleFunc("POST /api/sessions/{id}/stop", c.handleStop)
 	mux.HandleFunc("GET /api/sessions/{id}/screen", c.handleScreen)
 	mux.HandleFunc("POST /api/sessions/{id}/resize", c.handleResize)
+}
+
+// logEvent records a dashboard action; actions from the remote listener are
+// marked so they can be told apart from the PC.
+func (c *controller) logEvent(id, name, detail string) {
+	if c.remote {
+		detail = strings.TrimSpace("[remote] " + detail)
+	}
+	c.store.logEvent(id, name, detail)
 }
 
 func readJSON(r *http.Request, v any) error {
@@ -206,7 +218,7 @@ func (c *controller) handleSend(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	c.store.logEvent(sess.ID, "WebSend", truncate(text, 120))
+	c.logEvent(sess.ID, "WebSend", truncate(text, 120))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -237,7 +249,7 @@ func (c *controller) handleKeys(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	c.store.logEvent(sess.ID, "WebKeys", strings.Join(req.Keys, " "))
+	c.logEvent(sess.ID, "WebKeys", strings.Join(req.Keys, " "))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -262,7 +274,7 @@ func (c *controller) handleStop(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusInternalServerError, err)
 			return
 		}
-		c.store.logEvent(sess.ID, "WebInterrupt", "")
+		c.logEvent(sess.ID, "WebInterrupt", "")
 	case "exit":
 		switch {
 		case sess.PID > 0 && isClaudeProcess(sess.PID):
@@ -288,7 +300,7 @@ func (c *controller) handleStop(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusConflict, errors.New("no process to stop"))
 			return
 		}
-		c.store.logEvent(sess.ID, "WebExit", "")
+		c.logEvent(sess.ID, "WebExit", "")
 	default:
 		fail(w, http.StatusBadRequest, errors.New("mode must be interrupt or exit"))
 		return

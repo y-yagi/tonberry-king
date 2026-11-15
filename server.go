@@ -43,6 +43,7 @@ const (
 	maxEvents    = 100
 	endedTTL     = 24 * time.Hour
 	livenessTick = 3 * time.Second
+	authRecheck  = 2 * time.Second // how often an open event stream re-checks its token
 )
 
 type Event struct {
@@ -120,26 +121,66 @@ func stateDir() string {
 func defaultStatePath() string { return filepath.Join(stateDir(), "sessions.json") }
 func tokenPath() string        { return filepath.Join(stateDir(), "token") }
 
-func readToken() string {
-	b, _ := os.ReadFile(tokenPath())
+// remoteTokenPath holds the token for the remote (phone) listener. It is kept
+// separate so the PC token is never accepted remotely and the remote one can
+// be rotated on its own.
+func remoteTokenPath() string { return filepath.Join(stateDir(), "remote-token") }
+
+func readTokenFile(path string) string {
+	b, _ := os.ReadFile(path)
 	return strings.TrimSpace(string(b))
 }
 
-// loadOrCreateToken loads the API token, creating it with mode 0600 if missing.
-func loadOrCreateToken() (string, error) {
-	if t := readToken(); t != "" {
-		return t, nil
-	}
+func readToken() string { return readTokenFile(tokenPath()) }
+
+func newToken() (string, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	t := hex.EncodeToString(b)
-	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
+	return hex.EncodeToString(b), nil
+}
+
+// writeTokenFile atomically writes a token with mode 0600. The temp file gets
+// a fresh random name (CreateTemp uses O_EXCL and mode 0600), so a leftover or
+// planted file cannot widen the permissions or redirect the write.
+func writeTokenFile(path, t string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".token-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name()) // no-op after a successful rename
+	if _, err := f.WriteString(t + "\n"); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+// loadOrCreateTokenAt loads the token at path, creating it with mode 0600 if missing.
+func loadOrCreateTokenAt(path string) (string, error) {
+	if t := readTokenFile(path); t != "" {
+		return t, nil
+	}
+	t, err := newToken()
+	if err != nil {
 		return "", err
 	}
-	return t, os.WriteFile(tokenPath(), []byte(t+"\n"), 0o600)
+	return t, writeTokenFile(path, t)
 }
+
+// loadOrCreateToken loads the API token, creating it with mode 0600 if missing.
+func loadOrCreateToken() (string, error) { return loadOrCreateTokenAt(tokenPath()) }
 
 func dashboardURL(addr, token string) string {
 	return fmt.Sprintf("http://%s/#token=%s", addr, token)
@@ -743,24 +784,22 @@ func isLoopbackHost(h string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// guard requires a loopback Host header (DNS rebinding protection) and a token
-// for /api/ (X-Tonberry-Token header or token query parameter).
-func guard(token string, next http.Handler) http.Handler {
+// guard requires an allowed Host header (DNS rebinding protection) and a
+// token for /api/ (X-Tonberry-Token header or token query parameter). token is
+// called on every request so a rotated token takes effect immediately; an
+// empty token rejects every API request.
+func guard(hostOK func(host, port string) bool, token func() string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host, _, err := net.SplitHostPort(r.Host)
+		host, port, err := net.SplitHostPort(r.Host)
 		if err != nil {
-			host = r.Host
+			host, port = r.Host, ""
 		}
-		if !isLoopbackHost(strings.Trim(host, "[]")) {
+		if !hostOK(strings.Trim(host, "[]"), port) {
 			http.Error(w, "forbidden host", http.StatusForbidden)
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			got := r.Header.Get("X-Tonberry-Token")
-			if got == "" {
-				got = r.URL.Query().Get("token")
-			}
-			if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+			if !tokenMatches(r, token()) {
 				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return
 			}
@@ -769,21 +808,35 @@ func guard(token string, next http.Handler) http.Handler {
 	})
 }
 
-func serve(addr, statePath, claudeBin string) error {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return err
+// requestToken returns the token sent with the request (X-Tonberry-Token
+// header, or the token query parameter for EventSource).
+func requestToken(r *http.Request) string {
+	if t := r.Header.Get("X-Tonberry-Token"); t != "" {
+		return t
 	}
-	if !isLoopbackHost(host) {
-		return errors.New("refusing to listen on non-loopback address: " + addr)
-	}
-	token, err := loadOrCreateToken()
-	if err != nil {
-		return fmt.Errorf("token: %w", err)
-	}
+	return r.URL.Query().Get("token")
+}
 
-	store := newStore(statePath)
-	ctl := &controller{store: store, claudeBin: claudeBin}
+func tokenMatches(r *http.Request, want string) bool {
+	return want != "" && subtle.ConstantTimeCompare([]byte(requestToken(r)), []byte(want)) == 1
+}
+
+func loopbackHostOK(host, _ string) bool { return isLoopbackHost(host) }
+
+type serveConfig struct {
+	addr, statePath, claudeBin string
+	// remoteAddr / remoteHost enable the remote (phone) listener. Both or
+	// neither must be set; see remote.go.
+	remoteAddr, remoteHost string
+}
+
+// newMux builds the routes. The remote mux does not register the routes the
+// phone must not use (launch, delete, clear-ended, hook) at all, so they
+// cannot be reached through it however the request is crafted.
+//
+// stillAuthorized is re-checked while an event stream is open, so a rotated
+// token also cuts off streams opened with the old one.
+func newMux(store *Store, ctl *controller, remote bool, stillAuthorized func(*http.Request) bool) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	sub, _ := fs.Sub(webFS, "web")
@@ -794,14 +847,8 @@ func serve(addr, statePath, claudeBin string) error {
 		static.ServeHTTP(w, r)
 	})
 
-	mux.HandleFunc("POST /api/hook", func(w http.ResponseWriter, r *http.Request) {
-		var p map[string]any
-		if err := json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&p); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		store.apply(p)
-		w.WriteHeader(http.StatusNoContent)
+	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]bool{"remote": remote})
 	})
 
 	mux.HandleFunc("GET /api/sessions", func(w http.ResponseWriter, r *http.Request) {
@@ -809,15 +856,27 @@ func serve(addr, statePath, claudeBin string) error {
 		w.Write(store.snapshot())
 	})
 
-	mux.HandleFunc("DELETE /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
-		store.remove(r.PathValue("id"))
-		w.WriteHeader(http.StatusNoContent)
-	})
+	if !remote {
+		mux.HandleFunc("POST /api/hook", func(w http.ResponseWriter, r *http.Request) {
+			var p map[string]any
+			if err := json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&p); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			store.apply(p)
+			w.WriteHeader(http.StatusNoContent)
+		})
 
-	mux.HandleFunc("POST /api/sessions/clear-ended", func(w http.ResponseWriter, r *http.Request) {
-		store.clearEnded()
-		w.WriteHeader(http.StatusNoContent)
-	})
+		mux.HandleFunc("DELETE /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+			store.remove(r.PathValue("id"))
+			w.WriteHeader(http.StatusNoContent)
+		})
+
+		mux.HandleFunc("POST /api/sessions/clear-ended", func(w http.ResponseWriter, r *http.Request) {
+			store.clearEnded()
+			w.WriteHeader(http.StatusNoContent)
+		})
+	}
 
 	ctl.routes(mux)
 
@@ -833,19 +892,64 @@ func serve(addr, statePath, claudeBin string) error {
 		defer store.unsubscribe(ch)
 		ping := time.NewTicker(20 * time.Second)
 		defer ping.Stop()
+		recheck := time.NewTicker(authRecheck)
+		defer recheck.Stop()
 		for {
 			select {
 			case <-r.Context().Done():
 				return
 			case snap := <-ch:
+				if !stillAuthorized(r) {
+					return
+				}
 				fmt.Fprintf(w, "data: %s\n\n", snap)
 				flusher.Flush()
+			case <-recheck.C:
+				if !stillAuthorized(r) {
+					return
+				}
 			case <-ping.C:
 				fmt.Fprint(w, ": ping\n\n")
 				flusher.Flush()
 			}
 		}
 	})
+	return mux
+}
+
+func requireLoopbackAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	if !isLoopbackHost(host) {
+		return errors.New("refusing to listen on non-loopback address: " + addr)
+	}
+	return nil
+}
+
+func serve(cfg serveConfig) error {
+	if err := requireLoopbackAddr(cfg.addr); err != nil {
+		return err
+	}
+	remote := cfg.remoteAddr != "" || cfg.remoteHost != ""
+	if remote {
+		if err := validateRemote(cfg.addr, cfg.remoteAddr, cfg.remoteHost); err != nil {
+			return err
+		}
+		if _, err := loadOrCreateTokenAt(remoteTokenPath()); err != nil {
+			return fmt.Errorf("remote token: %w", err)
+		}
+	}
+	token, err := loadOrCreateToken()
+	if err != nil {
+		return fmt.Errorf("token: %w", err)
+	}
+
+	store := newStore(cfg.statePath)
+	ctl := &controller{store: store, claudeBin: cfg.claudeBin}
+	pcToken := func() string { return token }
+	mux := newMux(store, ctl, false, func(r *http.Request) bool { return tokenMatches(r, pcToken()) })
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -864,16 +968,41 @@ func serve(addr, statePath, claudeBin string) error {
 		}
 	}()
 
-	srv := &http.Server{Addr: addr, Handler: guard(token, mux), ReadHeaderTimeout: 5 * time.Second}
+	// Request contexts derive from ctx, so open event streams end on shutdown
+	// instead of holding Shutdown until its timeout.
+	baseCtx := func(net.Listener) context.Context { return ctx }
+	servers := []*http.Server{{Addr: cfg.addr, Handler: guard(loopbackHostOK, pcToken, mux), ReadHeaderTimeout: 5 * time.Second, BaseContext: baseCtx}}
+	if remote {
+		rctl := &controller{store: store, claudeBin: cfg.claudeBin, remote: true}
+		rmux := newMux(store, rctl, true, remoteStillAuthorized)
+		servers = append(servers, &http.Server{Addr: cfg.remoteAddr, Handler: remoteHandler(cfg.remoteHost, rmux), ReadHeaderTimeout: 5 * time.Second, BaseContext: baseCtx})
+	}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		srv.Shutdown(sctx)
+		var wg sync.WaitGroup
+		for _, srv := range servers {
+			wg.Add(1)
+			go func(srv *http.Server) { defer wg.Done(); srv.Shutdown(sctx) }(srv)
+		}
+		wg.Wait()
 	}()
 
-	log.Printf("tonberry-king listening on %s (state: %s)", dashboardURL(addr, token), statePath)
-	err = srv.ListenAndServe()
+	log.Printf("tonberry-king listening on %s (state: %s)", dashboardURL(cfg.addr, token), cfg.statePath)
+	if remote {
+		log.Printf("remote listener on %s for https://%s (run `tonberry-king url -remote` for the phone URL)", cfg.remoteAddr, cfg.remoteHost)
+	}
+	errc := make(chan error, len(servers))
+	for _, srv := range servers {
+		go func(srv *http.Server) { errc <- srv.ListenAndServe() }(srv)
+	}
+	// If either listener fails, shut the whole server down.
+	err = <-errc
+	stop()
+	for range servers[1:] {
+		<-errc
+	}
 	store.persist()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
