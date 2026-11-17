@@ -274,13 +274,13 @@ body.remote .pc-only { display: none !important; }
       <button type="button" id="lSaveTpl" title="Save the instruction below as a template">Save as template</button>
       <button type="button" id="lDelPrompt" title="Delete the selected template or recent entry" hidden>Delete</button>
     </div>
-    <textarea id="lPrompt" rows="4"></textarea>
+    <textarea id="lPrompt" rows="4" placeholder="Ctrl+Enter to launch"></textarea>
     <label for="lArgs">Extra arguments (optional)</label>
     <input type="text" id="lArgs" placeholder="e.g. --model sonnet --permission-mode acceptEdits">
     <div class="err" id="lErr"></div>
     <div class="dlg-actions">
       <button type="button" id="lCancel">Cancel</button>
-      <button type="submit" class="primary" id="lSubmit">Launch</button>
+      <button type="submit" class="primary" id="lSubmit" title="Launch (Ctrl+Enter)">Launch</button>
     </div>
   </form>
 </dialog>
@@ -866,8 +866,12 @@ $("lDelPrompt").addEventListener("click", async () => {
 });
 $("launchBtn").addEventListener("click", () => openLaunch());
 $("lCancel").addEventListener("click", () => $("launchDlg").close());
+$("launchForm").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); $("launchForm").requestSubmit(); }
+});
 $("launchForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if ($("lSubmit").disabled) return; // a launch is already in flight
   $("lSubmit").disabled = true;
   $("lErr").textContent = "";
   const body = { dir: $("lDir").value, prompt: $("lPrompt").value, args: $("lArgs").value };
