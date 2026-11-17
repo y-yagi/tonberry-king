@@ -263,6 +263,10 @@ body.remote .pc-only { display: none !important; }
     <label for="lDir">Directory</label>
     <input type="text" id="lDir" list="dirList" required placeholder="~/src/github.com/...">
     <datalist id="dirList"></datalist>
+    <div class="prompt-tools">
+      <select id="lRecentDir" title="Pick a recently used directory"><option value="">Recent directories…</option></select>
+      <button type="button" id="lDelDir" title="Remove the selected directory from the history" hidden>Delete</button>
+    </div>
     <label for="lPrompt">Initial instruction (optional)</label>
     <div class="prompt-tools">
       <select id="lTemplate" title="Insert a saved template"><option value="">Templates…</option></select>
@@ -295,6 +299,7 @@ const LABEL = {
 const ORDER = { waiting_permission: 0, waiting_input: 1, starting: 2, running: 3, subagents: 4, scheduled: 5, compacting: 6, ended: 7 };
 
 let sessions = [];
+let prompts = { templates: [], recent: [], recent_dirs: [] }; // launch dialog history (loaded on open)
 let prevStatus = new Map();
 let firstLoad = true;
 let authError = false;
@@ -480,8 +485,7 @@ function render() {
   const waiting = (counts.waiting_permission || 0) + (counts.waiting_input || 0);
   document.title = (counts.waiting_permission ? `(⚠${counts.waiting_permission}) ` : waiting ? `(${waiting}) ` : "") + "Tonberry King";
 
-  const dirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))].sort();
-  $("dirList").innerHTML = dirs.map((d) => `<option value="${esc(home(d))}">`).join("");
+  renderDirList();
 
   updatePanel();
 
@@ -788,9 +792,18 @@ function openLaunch(dir) {
 }
 
 // ---- instruction templates / recent instructions ----
-let prompts = { templates: [], recent: [] };
 const oneLine = (t, n = 80) => { t = t.replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
+function renderDirList() {
+  const dirs = [...new Set([...(prompts.recent_dirs || []),
+    ...sessions.map((s) => s.cwd).filter(Boolean).sort()].map(home))];
+  $("dirList").innerHTML = dirs.map((d) => `<option value="${esc(d)}">`).join("");
+}
 function renderPrompts() {
+  const rd = prompts.recent_dirs || [];
+  $("lRecentDir").innerHTML = `<option value="">Recent directories…${rd.length ? "" : " (none)"}</option>` +
+    rd.map((d, i) => `<option value="${i}" title="${esc(d)}">${esc(home(d))}</option>`).join("");
+  $("lDelDir").hidden = true;
+  renderDirList();
   $("lTemplate").innerHTML = `<option value="">Templates…${prompts.templates.length ? "" : " (none)"}</option>` +
     prompts.templates.map((t, i) => `<option value="${i}" title="${esc(t.text)}">${esc(t.name)}</option>`).join("");
   $("lRecent").innerHTML = `<option value="">Recent…${prompts.recent.length ? "" : " (none)"}</option>` +
@@ -811,6 +824,21 @@ function pickPrompt(sel, other, text) {
 }
 $("lTemplate").addEventListener("change", (e) => pickPrompt(e.target, "lRecent", prompts.templates[e.target.value]?.text ?? ""));
 $("lRecent").addEventListener("change", (e) => pickPrompt(e.target, "lTemplate", prompts.recent[e.target.value] ?? ""));
+$("lRecentDir").addEventListener("change", (e) => {
+  const d = prompts.recent_dirs?.[e.target.value];
+  $("lDelDir").hidden = d === undefined;
+  if (d === undefined) return;
+  $("lDir").value = home(d);
+  $("lPrompt").focus();
+});
+$("lDelDir").addEventListener("click", async () => {
+  const d = prompts.recent_dirs?.[$("lRecentDir").value];
+  if (d === undefined) return;
+  try {
+    prompts = await (await api("POST", "/api/prompts/dirs/delete", { dir: d })).json();
+    renderPrompts();
+  } catch (err) { $("lErr").textContent = err.message; }
+});
 $("lSaveTpl").addEventListener("click", async () => {
   const text = $("lPrompt").value.trim();
   if (!text) { $("lErr").textContent = "Type an instruction to save as a template"; return; }

@@ -10,7 +10,10 @@ import (
 	"sync"
 )
 
-const maxRecentPrompts = 20
+const (
+	maxRecentPrompts = 20
+	maxRecentDirs    = 20
+)
 
 // Template is a named initial instruction saved from the launch dialog.
 type Template struct {
@@ -20,7 +23,8 @@ type Template struct {
 
 type promptData struct {
 	Templates []Template `json:"templates"`
-	Recent    []string   `json:"recent"` // most recent first
+	Recent    []string   `json:"recent"`      // most recent first
+	Dirs      []string   `json:"recent_dirs"` // launch directories, most recent first
 }
 
 // promptStore keeps instruction templates and recently used initial
@@ -45,6 +49,7 @@ func (ps *promptStore) snapshot() promptData {
 	d := promptData{
 		Templates: append([]Template{}, ps.data.Templates...),
 		Recent:    append([]string{}, ps.data.Recent...),
+		Dirs:      append([]string{}, ps.data.Dirs...),
 	}
 	return d
 }
@@ -65,6 +70,28 @@ func (ps *promptStore) save() error {
 	return os.Rename(tmp, ps.path)
 }
 
+// pushFront moves text to the front of list, dropping duplicates and
+// keeping at most max entries.
+func pushFront(list []string, text string, max int) []string {
+	out := []string{text}
+	for _, r := range list {
+		if r != text && len(out) < max {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func without(list []string, text string) []string {
+	out := list[:0]
+	for _, r := range list {
+		if r != text {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func (ps *promptStore) addRecent(text string) error {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -72,26 +99,32 @@ func (ps *promptStore) addRecent(text string) error {
 	}
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	recent := []string{text}
-	for _, r := range ps.data.Recent {
-		if r != text && len(recent) < maxRecentPrompts {
-			recent = append(recent, r)
-		}
-	}
-	ps.data.Recent = recent
+	ps.data.Recent = pushFront(ps.data.Recent, text, maxRecentPrompts)
 	return ps.save()
 }
 
 func (ps *promptStore) removeRecent(text string) error {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	recent := ps.data.Recent[:0]
-	for _, r := range ps.data.Recent {
-		if r != text {
-			recent = append(recent, r)
-		}
+	ps.data.Recent = without(ps.data.Recent, text)
+	return ps.save()
+}
+
+// addDir records a directory claude was launched in.
+func (ps *promptStore) addDir(dir string) error {
+	if dir == "" {
+		return nil
 	}
-	ps.data.Recent = recent
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.data.Dirs = pushFront(ps.data.Dirs, dir, maxRecentDirs)
+	return ps.save()
+}
+
+func (ps *promptStore) removeDir(dir string) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.data.Dirs = without(ps.data.Dirs, dir)
 	return ps.save()
 }
 
@@ -166,6 +199,20 @@ func (ps *promptStore) routes(mux *http.ServeMux) {
 			return
 		}
 		if err := ps.removeRecent(req.Text); err != nil {
+			fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, ps.snapshot())
+	})
+	mux.HandleFunc("POST /api/prompts/dirs/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Dir string `json:"dir"`
+		}
+		if err := readJSON(r, &req); err != nil {
+			fail(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := ps.removeDir(req.Dir); err != nil {
 			fail(w, http.StatusInternalServerError, err)
 			return
 		}

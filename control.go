@@ -168,6 +168,9 @@ func (c *controller) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		if err := c.prompts.addRecent(req.Prompt); err != nil {
 			log.Printf("save recent prompt: %v", err)
 		}
+		if err := c.prompts.addDir(dir); err != nil {
+			log.Printf("save recent directory: %v", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": sess.ID, "tmux_session": name})
 }

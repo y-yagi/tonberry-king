@@ -42,4 +42,16 @@ func TestPromptStore(t *testing.T) {
 	if d = ps.snapshot(); len(d.Templates) != 1 || d.Templates[0].Name != "test" {
 		t.Fatalf("templates after delete = %v", d.Templates)
 	}
+
+	ps.addDir("/a")
+	ps.addDir("/b")
+	ps.addDir("/a")
+	ps.addDir("")
+	if d = newPromptStore(path).snapshot(); len(d.Dirs) != 2 || d.Dirs[0] != "/a" || d.Dirs[1] != "/b" {
+		t.Fatalf("dirs = %v", d.Dirs)
+	}
+	ps.removeDir("/a")
+	if d = ps.snapshot(); len(d.Dirs) != 1 || d.Dirs[0] != "/b" {
+		t.Fatalf("dirs after delete = %v", d.Dirs)
+	}
 }
