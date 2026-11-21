@@ -316,7 +316,9 @@ new ResizeObserver(([e]) => {
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  remove(k) { try { localStorage.removeItem(k); } catch {} },
 };
+store.remove("lastArgs"); // no longer remembered; drop any value saved by older versions
 
 // Save #token=... from the URL and remove it from the address bar.
 (() => {
@@ -785,7 +787,6 @@ function openLaunch(dir) {
   $("lErr").textContent = "";
   if (dir) $("lDir").value = dir;
   else if (!$("lDir").value) $("lDir").value = store.get("lastDir") || "";
-  $("lArgs").value = $("lArgs").value || store.get("lastArgs") || "";
   $("launchDlg").showModal();
   (dir ? $("lPrompt") : $("lDir")).focus();
   loadPrompts();
@@ -879,8 +880,8 @@ $("launchForm").addEventListener("submit", async (e) => {
     const res = await api("POST", "/api/launch", body);
     const { id } = await res.json();
     store.set("lastDir", body.dir);
-    store.set("lastArgs", body.args);
     $("lPrompt").value = "";
+    $("lArgs").value = "";
     $("launchDlg").close();
     setTimeout(() => openPanel(id), 200);
   } catch (err) {
