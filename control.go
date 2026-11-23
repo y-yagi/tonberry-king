@@ -25,7 +25,8 @@ import (
 // Keys that may be sent via tmux (arbitrary keys are not allowed).
 var allowedKeys = map[string]bool{
 	"Enter": true, "Escape": true, "Up": true, "Down": true, "Left": true, "Right": true,
-	"Tab": true, "BTab": true, "C-c": true, "1": true, "2": true, "3": true,
+	"Tab": true, "BTab": true, "C-c": true,
+	"1": true, "2": true, "3": true, "4": true, "5": true, "6": true, "7": true, "8": true, "9": true,
 }
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
